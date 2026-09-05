@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/*
+!data/.keep
+.env
+*.log
+auth_info_baileys/

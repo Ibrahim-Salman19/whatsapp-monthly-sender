@@ -1,0 +1,15 @@
+[Unit]
+Description=WhatsApp Monthly Sender
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/d/code/automation
+ExecStart=/usr/bin/env node dist/index.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+EnvironmentFile=-/mnt/d/code/automation/.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3095 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp Monthly Sender</title>
+<script src="https://cdn.tailwindcss.com">
+// ── Phone Pairing Code ──
+async function requestPairingCodeUI() {
+  const phoneInput = document.getElementById('pair-phone-input');
+  const btn = document.getElementById('btn-request-pairing');
+  const statusEl = document.getElementById('pair-phone-status');
+  const phone = phoneInput.value.trim();
+  
+  if (!phone) {
+    showToast('Please enter your WhatsApp phone number', 'error');
+    phoneInput.focus();
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Requesting...';
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = 'Contacting WhatsApp servers...';
+  
+  try {
+    const res = await api('/session/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone })
+    });
+    
+    document.getElementById('pairing-code-box').classList.remove('hidden');
+    document.getElementById('pairing-code-text').textContent = res.code;
+    statusEl.textContent = 'Code generated! Enter this code in WhatsApp on your phone.';
+    showToast('Pairing code generated!', 'success');
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    showToast('Pairing failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Get Pairing Code';
+  }
+}
+
+function copyPairingCode() {
+  const code = document.getElementById('pairing-code-text').textContent.trim();
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => {
+    showToast('Pairing code copied to clipboard!', 'success');
+  }).catch(() => {
+    showToast('Code: ' + code);
+  });
+}
+
+// ── Re-enable Opted Out Contact ──
+async function reEnableContact(id) {
+  if (!confirm('Re-enable this contact and remove opt-out status? They will receive future monthly messages.')) return;
+  try {
+    await api('/contacts/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opted_out: 0, active: 1 })
+    });
+    showToast('Contact re-enabled successfully', 'success');
+    loadContacts(contactsPage);
+  } catch(e) {
+    showToast('Failed to re-enable contact: ' + e.message, 'error');
+  }
+}
+
+// ── Change Master Password ──
+async function submitChangePassword() {
+  const currentPassword = document.getElementById('change-pwd-current').value;
+  const newPassword = document.getElementById('change-pwd-new').value;
+  
+  if (!currentPassword || !newPassword) {
+    return showToast('Both current and new password are required', 'error');
+  }
+  if (newPassword.length < 6) {
+    return showToast('New password must be at least 6 characters', 'error');
+  }
+  
+  try {
+    const res = await api('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    showToast(res.message || 'Password changed successfully', 'success');
+    document.getElementById('change-pwd-current').value = '';
+    document.getElementById('change-pwd-new').value = '';
+  } catch(e) {
+    showToast('Password change failed: ' + e.message, 'error');
+  }
+}
+
+// ── System Logs & Diagnostics ──
+let rawSystemLogs = [];
+let activeLogFilter = 'all';
+let logAutoRefresh = true;
+let logRefreshTimer = null;
+
+async function loadSystemLogs() {
+  try {
+    rawSystemLogs = await api('/system/logs');
+    renderSystemLogs();
+  } catch(e) {}
+}
+
+function filterLogs(level) {
+  activeLogFilter = level;
+  ['all', 'info', 'warn', 'error'].forEach(lvl => {
+    const btn = document.getElementById('log-filter-' + lvl);
+    if (btn) {
+      if (lvl === level) {
+        btn.classList.add('active', 'font-semibold', 'bg-[#202c33]');
+      } else {
+        btn.classList.remove('active', 'font-semibold', 'bg-[#202c33]');
+      }
+    }
+  });
+  renderSystemLogs();
+}
+
+function renderSystemLogs() {
+  const container = document.getElementById('system-logs-container');
+  if (!container) return;
+  
+  const filtered = activeLogFilter === 'all' 
+    ? rawSystemLogs 
+    : rawSystemLogs.filter(l => l.level === activeLogFilter);
+    
+  document.getElementById('log-count-indicator').textContent = `${filtered.length} events showing`;
+  
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="text-[#8696a0] py-4 text-center">No logs found matching filter</div>';
+    return;
+  }
+  
+  const levelBadges = {
+    info: '<span class="text-blue-400 font-bold">[INFO]</span>',
+    warn: '<span class="text-amber-400 font-bold">[WARN]</span>',
+    error: '<span class="text-red-400 font-bold">[ERR ]</span>'
+  };
+  
+  container.innerHTML = filtered.map(l => {
+    const time = new Date(l.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const badge = levelBadges[l.level] || '<span class="text-gray-400">[LOG ]</span>';
+    return `
+      <div class="flex items-start gap-2.5 py-1 border-b border-[#222e35]/30 hover:bg-[#111b21] px-1 rounded">
+        <span class="text-[#8696a0] select-none text-[11px]">${time}</span>
+        <span class="select-none text-[11px]">${badge}</span>
+        <span class="text-white/90 break-all leading-relaxed">${esc(l.message)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleLogAutoRefresh() {
+  logAutoRefresh = !logAutoRefresh;
+  const btn = document.getElementById('btn-toggle-log-auto');
+  if (logAutoRefresh) {
+    btn.textContent = 'Auto-refresh: ON';
+    btn.className = 'btn btn-outline-green text-xs';
+    startLogAutoRefresh();
+  } else {
+    btn.textContent = 'Auto-refresh: OFF';
+    btn.className = 'btn btn-ghost text-xs text-[#8696a0]';
+    if (logRefreshTimer) clearInterval(logRefreshTimer);
+  }
+}
+
+function startLogAutoRefresh() {
+  if (logRefreshTimer) clearInterval(logRefreshTimer);
+  logRefreshTimer = setInterval(() => {
+    const logsPage = document.getElementById('page-logs');
+    if (logsPage && logsPage.classList.contains('active')) {
+      loadSystemLogs();
+    }
+  }, 4000);
+}
+startLogAutoRefresh();
+
+</script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        wa: {
+          green: '#25D366',
+          darkgreen: '#128C7E',
+          teal: '#075E54',
+          bg: '#0b141a',
+          panel: '#111b21',
+          card: '#202c33',
+          card2: '#2a3942',
+          border: '#222e35',
+          text: '#e9edef',
+          muted: '#8696a0',
+          bubble: '#005c4b'
+        }
+      }
+    }
+  }
+}
+
+// ── Phone Pairing Code ──
+async function requestPairingCodeUI() {
+  const phoneInput = document.getElementById('pair-phone-input');
+  const btn = document.getElementById('btn-request-pairing');
+  const statusEl = document.getElementById('pair-phone-status');
+  const phone = phoneInput.value.trim();
+  
+  if (!phone) {
+    showToast('Please enter your WhatsApp phone number', 'error');
+    phoneInput.focus();
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Requesting...';
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = 'Contacting WhatsApp servers...';
+  
+  try {
+    const res = await api('/session/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone })
+    });
+    
+    document.getElementById('pairing-code-box').classList.remove('hidden');
+    document.getElementById('pairing-code-text').textContent = res.code;
+    statusEl.textContent = 'Code generated! Enter this code in WhatsApp on your phone.';
+    showToast('Pairing code generated!', 'success');
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    showToast('Pairing failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Get Pairing Code';
+  }
+}
+
+function copyPairingCode() {
+  const code = document.getElementById('pairing-code-text').textContent.trim();
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => {
+    showToast('Pairing code copied to clipboard!', 'success');
+  }).catch(() => {
+    showToast('Code: ' + code);
+  });
+}
+
+// ── Re-enable Opted Out Contact ──
+async function reEnableContact(id) {
+  if (!confirm('Re-enable this contact and remove opt-out status? They will receive future monthly messages.')) return;
+  try {
+    await api('/contacts/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opted_out: 0, active: 1 })
+    });
+    showToast('Contact re-enabled successfully', 'success');
+    loadContacts(contactsPage);
+  } catch(e) {
+    showToast('Failed to re-enable contact: ' + e.message, 'error');
+  }
+}
+
+// ── Change Master Password ──
+async function submitChangePassword() {
+  const currentPassword = document.getElementById('change-pwd-current').value;
+  const newPassword = document.getElementById('change-pwd-new').value;
+  
+  if (!currentPassword || !newPassword) {
+    return showToast('Both current and new password are required', 'error');
+  }
+  if (newPassword.length < 6) {
+    return showToast('New password must be at least 6 characters', 'error');
+  }
+  
+  try {
+    const res = await api('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    showToast(res.message || 'Password changed successfully', 'success');
+    document.getElementById('change-pwd-current').value = '';
+    document.getElementById('change-pwd-new').value = '';
+  } catch(e) {
+    showToast('Password change failed: ' + e.message, 'error');
+  }
+}
+
+// ── System Logs & Diagnostics ──
+let rawSystemLogs = [];
+let activeLogFilter = 'all';
+let logAutoRefresh = true;
+let logRefreshTimer = null;
+
+async function loadSystemLogs() {
+  try {
+    rawSystemLogs = await api('/system/logs');
+    renderSystemLogs();
+  } catch(e) {}
+}
+
+function filterLogs(level) {
+  activeLogFilter = level;
+  ['all', 'info', 'warn', 'error'].forEach(lvl => {
+    const btn = document.getElementById('log-filter-' + lvl);
+    if (btn) {
+      if (lvl === level) {
+        btn.classList.add('active', 'font-semibold', 'bg-[#202c33]');
+      } else {
+        btn.classList.remove('active', 'font-semibold', 'bg-[#202c33]');
+      }
+    }
+  });
+  renderSystemLogs();
+}
+
+function renderSystemLogs() {
+  const container = document.getElementById('system-logs-container');
+  if (!container) return;
+  
+  const filtered = activeLogFilter === 'all' 
+    ? rawSystemLogs 
+    : rawSystemLogs.filter(l => l.level === activeLogFilter);
+    
+  document.getElementById('log-count-indicator').textContent = `${filtered.length} events showing`;
+  
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="text-[#8696a0] py-4 text-center">No logs found matching filter</div>';
+    return;
+  }
+  
+  const levelBadges = {
+    info: '<span class="text-blue-400 font-bold">[INFO]</span>',
+    warn: '<span class="text-amber-400 font-bold">[WARN]</span>',
+    error: '<span class="text-red-400 font-bold">[ERR ]</span>'
+  };
+  
+  container.innerHTML = filtered.map(l => {
+    const time = new Date(l.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const badge = levelBadges[l.level] || '<span class="text-gray-400">[LOG ]</span>';
+    return `
+      <div class="flex items-start gap-2.5 py-1 border-b border-[#222e35]/30 hover:bg-[#111b21] px-1 rounded">
+        <span class="text-[#8696a0] select-none text-[11px]">${time}</span>
+        <span class="select-none text-[11px]">${badge}</span>
+        <span class="text-white/90 break-all leading-relaxed">${esc(l.message)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleLogAutoRefresh() {
+  logAutoRefresh = !logAutoRefresh;
+  const btn = document.getElementById('btn-toggle-log-auto');
+  if (logAutoRefresh) {
+    btn.textContent = 'Auto-refresh: ON';
+    btn.className = 'btn btn-outline-green text-xs';
+    startLogAutoRefresh();
+  } else {
+    btn.textContent = 'Auto-refresh: OFF';
+    btn.className = 'btn btn-ghost text-xs text-[#8696a0]';
+    if (logRefreshTimer) clearInterval(logRefreshTimer);
+  }
+}
+
+function startLogAutoRefresh() {
+  if (logRefreshTimer) clearInterval(logRefreshTimer);
+  logRefreshTimer = setInterval(() => {
+    const logsPage = document.getElementById('page-logs');
+    if (logsPage && logsPage.classList.contains('active')) {
+      loadSystemLogs();
+    }
+  }, 4000);
+}
+startLogAutoRefresh();
+
+</script>
+<style>
+  body { background: #0b141a; color: #e9edef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  .page { display: none; }
+  .page.active { display: block; }
+  input, textarea, select { background: #2a3942; border: 1px solid #3b4a54; color: #e9edef; border-radius: 8px; padding: 10px 14px; width: 100%; font-size: 14px; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #25D366; }
+  .btn { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 8px; font-weight: 500; font-size: 14px; cursor: pointer; transition: all 0.15s ease-in-out; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-green { background: #25D366; color: #111B21; }
+  .btn-green:hover:not(:disabled) { background: #20ba5a; }
+  .btn-red { background: #ea4335; color: white; }
+  .btn-red:hover:not(:disabled) { background: #d33426; }
+  .btn-ghost { background: #202c33; border: 1px solid #3b4a54; color: #e9edef; }
+  .btn-ghost:hover:not(:disabled) { background: #2a3942; border-color: #4f6370; }
+  .btn-outline-green { background: transparent; border: 1px solid #25D366; color: #25D366; }
+  .btn-outline-green:hover:not(:disabled) { background: rgba(37,211,102,0.1); }
+  .card { background: #111b21; border: 1px solid #222e35; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .card-inner { background: #202c33; border-radius: 8px; padding: 16px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot-green { background: #25D366; box-shadow: 0 0 10px #25D366; }
+  .dot-yellow { background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }
+  .dot-red { background: #ea4335; box-shadow: 0 0 10px #ea4335; }
+  .dot-gray { background: #6b7280; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid #222e35; font-size: 14px; }
+  th { color: #8696a0; font-size: 12px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .nav-item { padding: 12px 16px; border-radius: 8px; cursor: pointer; color: #8696a0; transition: all 0.15s; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; }
+  .nav-item:hover, .nav-item.active { background: #202c33; color: #e9edef; }
+  .nav-item.active { border-left: 3px solid #25D366; }
+  .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+  .tag-sent { background: rgba(37,211,102,0.15); color: #25D366; border: 1px solid rgba(37,211,102,0.3); }
+  .tag-failed { background: rgba(234,67,53,0.15); color: #ea4335; border: 1px solid rgba(234,67,53,0.3); }
+  .tag-skipped { background: rgba(134,150,160,0.15); color: #8696a0; border: 1px solid rgba(134,150,160,0.3); }
+  .tag-active { background: rgba(37,211,102,0.15); color: #25D366; }
+  .tag-inactive { background: rgba(134,150,160,0.15); color: #8696a0; }
+  .chat-bubble { position: relative; background: #005c4b; color: #e9edef; padding: 12px 16px; border-radius: 8px; max-width: 85%; line-height: 1.5; font-size: 14px; word-break: break-word; }
+  .chat-bubble::after { content: ''; position: absolute; top: 0; left: -8px; width: 0; height: 0; border-top: 10px solid #005c4b; border-left: 10px solid transparent; }
+  @media (max-width: 768px) {
+    .responsive-table table, .responsive-table thead, .responsive-table tbody, .responsive-table th, .responsive-table td, .responsive-table tr { display: block; }
+    .responsive-table thead { display: none; }
+    .responsive-table tr { margin-bottom: 12px; background: #202c33; border-radius: 8px; padding: 12px; border: 1px solid #2a3942; }
+    .responsive-table td { padding: 6px 0; position: relative; padding-left: 45%; border-bottom: none; }
+    .responsive-table td::before { content: attr(data-label); position: absolute; left: 0; font-weight: 500; color: #8696a0; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="app" class="flex min-h-screen">
+  <!-- Sidebar Desktop -->
+  <aside class="w-64 p-4 border-r border-[#222e35] bg-[#111b21] flex-col gap-2 shrink-0 hidden md:flex">
+    <div class="px-2 py-4 mb-3 border-b border-[#222e35]">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-full bg-[#25D366] flex items-center justify-center font-bold text-[#111b21]">WA</div>
+        <div>
+          <div class="font-bold text-base text-white tracking-wide">Monthly Sender</div>
+          <div class="text-xs text-[#8696a0] flex items-center gap-1.5 mt-0.5" id="sidebar-status-box">
+            <span class="status-dot dot-gray" id="sidebar-dot"></span>
+            <span id="sidebar-status">Checking...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="flex-1 flex flex-col gap-1">
+      <div class="nav-item active" onclick="showPage('status')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span>Status</span>
+      </div>
+      <div class="nav-item" onclick="showPage('contacts')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        <span>Contacts</span>
+        <span class="ml-auto bg-[#202c33] text-xs px-2 py-0.5 rounded-full text-[#8696a0]" id="sidebar-contacts-count">0</span>
+      </div>
+      <div class="nav-item" onclick="showPage('groups')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+        <span>Groups</span>
+      </div>
+      <div class="nav-item" onclick="showPage('templates')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+        <span>Templates</span>
+      </div>
+      <div class="nav-item" onclick="showPage('schedule')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>Schedule & Pauses</span>
+      </div>
+      <div class="nav-item" onclick="showPage('history')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+        <span>History</span>
+      </div>
+      <div class="nav-item" onclick="showPage('settings')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span>Settings</span>
+      </div>
+    </nav>
+
+    <div class="mt-auto pt-3 border-t border-[#222e35] flex flex-col gap-2">
+      <button class="btn btn-outline-green w-full text-xs py-2 h-auto flex items-center justify-center gap-1.5" onclick="openTestModal()">
+        <span>✉️ Quick Test Message</span>
+      </button>
+      <div class="nav-item text-[#ea4335] hover:bg-red-950/30" onclick="logout()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        <span>Logout</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Mobile Header -->
+  <div class="md:hidden fixed top-0 left-0 right-0 h-16 bg-[#111b21] border-b border-[#222e35] z-30 flex items-center justify-between px-4">
+    <button class="p-2 bg-[#202c33] rounded-lg text-white" onclick="toggleSidebar()">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <div class="font-bold text-[#25D366] text-base">WA Monthly Sender</div>
+    <button class="btn btn-green text-xs px-3 py-1.5 h-auto" onclick="openTestModal()">Test</button>
+  </div>
+
+  <!-- Mobile Overlay & Drawer -->
+  <div id="sidebar-overlay" class="hidden fixed inset-0 bg-black/60 z-40" onclick="toggleSidebar()"></div>
+  <nav id="mobile-sidebar" class="hidden fixed left-0 top-0 h-full w-72 bg-[#111b21] z-50 p-4 flex flex-col gap-1 border-r border-[#222e35]">
+    <div class="px-2 py-4 mb-3 border-b border-[#222e35] flex items-center justify-between">
+      <div class="font-bold text-lg text-[#25D366]">WA Sender</div>
+      <button onclick="toggleSidebar()" class="text-[#8696a0] hover:text-white text-xl">&times;</button>
+    </div>
+    <div class="nav-item active" onclick="showPage('status'); toggleSidebar()">📊 Status</div>
+    <div class="nav-item" onclick="showPage('contacts'); toggleSidebar()">👥 Contacts</div>
+    <div class="nav-item" onclick="showPage('groups'); toggleSidebar()">🏷️ Groups</div>
+    <div class="nav-item" onclick="showPage('templates'); toggleSidebar()">✉️ Templates</div>
+    <div class="nav-item" onclick="showPage('schedule'); toggleSidebar()">⏰ Schedule & Pauses</div>
+    <div class="nav-item" onclick="showPage('history'); toggleSidebar()">📋 History</div>
+    <div class="nav-item" onclick="showPage('settings'); toggleSidebar()">⚙️ Settings</div>
+    <div class="nav-item" onclick="showPage('logs'); toggleSidebar()">📜 System Logs</div>
+    <div class="mt-auto pt-3 border-t border-[#222e35]">
+      <div class="nav-item text-[#ea4335]" onclick="logout()">🚪 Logout</div>
+    </div>
+  </nav>
+
+  <!-- Main Viewport -->
+  <main class="flex-1 p-4 md:p-8 max-w-5xl overflow-y-auto w-full mt-16 md:mt-0">
+    <!-- Global Pause Banner -->
+    <div id="global-pause-banner" class="hidden bg-amber-500/15 border border-amber-500/40 text-amber-300 px-4 py-3 rounded-xl mb-6 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="text-xl">⚠️</span>
+        <span class="text-sm font-medium">Monthly automated sending is currently <strong>PAUSED</strong>. Scheduled messages will not run.</span>
+      </div>
+      <button class="btn btn-ghost text-xs px-3 py-1.5 h-auto text-amber-200 border-amber-500/50 hover:bg-amber-500/20" onclick="resumeGlobalPause()">Resume Sending</button>
+    </div>
+
+    <!-- Active Live Send Progress Banner -->
+    <div id="active-send-banner" class="hidden card border-[#25D366]/40 bg-[#111b21] mb-6 p-5">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="w-3 h-3 rounded-full bg-[#25D366] animate-ping"></span>
+          <span class="font-bold text-[#25D366] text-base">Sending Messages in Progress...</span>
+        </div>
+        <button class="btn btn-red text-xs px-3 py-1.5 h-auto" onclick="abortActiveSend()">Stop / Abort Send</button>
+      </div>
+      <div class="text-sm text-[#8696a0] mb-3" id="live-send-current">Preparing recipients...</div>
+      <div class="w-full bg-[#202c33] rounded-full h-3 mb-2 overflow-hidden">
+        <div id="live-send-bar" class="bg-[#25D366] h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+      <div class="flex justify-between text-xs text-[#8696a0]">
+        <span id="live-send-counts">0 / 0</span>
+        <span id="live-send-pct">0%</span>
+      </div>
+      <div class="mt-3 bg-[#0b141a] p-2.5 rounded-lg text-xs font-mono max-h-32 overflow-y-auto text-[#8696a0] flex flex-col gap-1" id="live-send-log"></div>
+    </div>
+
+    <!-- 1. STATUS PAGE -->
+    <section class="page active" id="page-status">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">System Status</h1>
+          <p class="text-sm text-[#8696a0]">Connection health and automation overview</p>
+        </div>
+        <div class="flex gap-2.5">
+          <button class="btn btn-ghost text-xs" onclick="loadStatus()">↻ Refresh</button>
+          <button class="btn btn-green text-xs font-semibold" onclick="confirmSendNow()">▶ Send Monthly Messages Now</button>
+        </div>
+      </div>
+
+      <!-- WhatsApp Connection Card -->
+      <div class="card" id="whatsapp-card">
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+          <div class="flex items-center gap-3">
+            <span class="status-dot dot-gray" id="status-dot"></span>
+            <div>
+              <div class="font-bold text-base" id="status-text">Checking connection...</div>
+              <div class="text-xs text-[#8696a0]" id="status-phone-info">Not linked</div>
+            </div>
+          </div>
+          <div class="flex gap-2" id="connection-actions">
+            <button class="btn btn-ghost text-xs" onclick="reconnectSession()" id="btn-reconnect">Reconnect</button>
+            <button class="btn btn-ghost text-xs text-[#ea4335]" onclick="relinkSession()" id="btn-relink">Reset Session / QR</button>
+          </div>
+        </div>
+
+        <!-- QR Code Container (shown only when needs_qr) -->
+        <div id="qr-container" class="hidden mt-4 p-5 bg-[#0b141a] rounded-xl border border-[#222e35] text-center">
+          <h3 class="text-base font-bold text-white mb-1">Scan QR Code with WhatsApp</h3>
+          <p class="text-xs text-[#8696a0] mb-4">Open WhatsApp on your phone → Linked Devices → Link a Device</p>
+          <div class="flex justify-center mb-3">
+            <div class="p-3 bg-white rounded-xl shadow-lg inline-block">
+              <img id="qr-image" class="w-64 h-64 mx-auto" alt="Scan QR Code" />
+            </div>
+          </div>
+          <div id="pairing-code-box" class="hidden mt-3 p-3 bg-[#202c33] rounded-lg max-w-sm mx-auto border border-[#25D366]/30">
+            <div class="text-xs text-[#8696a0] mb-1">Enter this Pairing Code in WhatsApp &gt; Linked Devices &gt; Link with phone number:</div>
+            <div class="text-2xl font-mono font-bold text-[#25D366] tracking-widest my-2 select-all" id="pairing-code-text"></div>
+            <button class="btn btn-ghost text-xs px-3 py-1 h-auto" onclick="copyPairingCode()">📋 Copy Code</button>
+          </div>
+
+          <div class="mt-4 pt-4 border-t border-[#222e35] max-w-sm mx-auto text-left">
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Link with phone number instead of QR:</label>
+            <div class="flex gap-2">
+              <input id="pair-phone-input" placeholder="e.g. 03001234567 or 923..." class="text-xs py-2 font-mono flex-1">
+              <button class="btn btn-green text-xs font-semibold px-3 whitespace-nowrap" id="btn-request-pairing" onclick="requestPairingCodeUI()">Get Pairing Code</button>
+            </div>
+            <div id="pair-phone-status" class="text-[11px] text-[#8696a0] mt-1.5 hidden"></div>
+          </div>
+          <button class="btn btn-ghost text-xs mt-3" onclick="loadStatus()">↻ Check if Scanned</button>
+        </div>
+      </div>
+
+      <!-- System Stats Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="card-inner">
+          <div class="text-xs text-[#8696a0] uppercase tracking-wider mb-1 font-semibold">Next Send</div>
+          <div class="text-base font-bold text-white truncate" id="stat-next-run">—</div>
+          <div class="text-xs text-[#25D366] mt-1" id="stat-next-countdown">Scheduled</div>
+        </div>
+        <div class="card-inner">
+          <div class="text-xs text-[#8696a0] uppercase tracking-wider mb-1 font-semibold">Last Run</div>
+          <div class="text-base font-bold text-white truncate" id="stat-last-run">—</div>
+          <div class="text-xs text-[#8696a0] mt-1" id="stat-last-period">—</div>
+        </div>
+        <div class="card-inner">
+          <div class="text-xs text-[#8696a0] uppercase tracking-wider mb-1 font-semibold">Active Contacts</div>
+          <div class="text-2xl font-bold text-white" id="stat-contacts-count">0</div>
+          <div class="text-xs text-[#8696a0] mt-1">Recipients for next send</div>
+        </div>
+        <div class="card-inner">
+          <div class="text-xs text-[#8696a0] uppercase tracking-wider mb-1 font-semibold">This Month</div>
+          <div class="text-2xl font-bold text-white" id="stat-month-sent">0 sent</div>
+          <div class="text-xs text-[#8696a0] mt-1" id="stat-month-total">0 total logged</div>
+        </div>
+      </div>
+
+      <!-- Quick Actions Grid -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-3">Quick Operations</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button class="btn btn-green justify-start gap-3 h-auto py-3" onclick="confirmSendNow()">
+            <span class="text-lg">🚀</span>
+            <div class="text-left">
+              <div class="font-semibold">Run Monthly Send Now</div>
+              <div class="text-xs opacity-80">Deliver to all active recipients</div>
+            </div>
+          </button>
+          <button class="btn btn-ghost justify-start gap-3 h-auto py-3" onclick="openTestModal()">
+            <span class="text-lg">✉️</span>
+            <div class="text-left">
+              <div class="font-semibold">Send Test Message</div>
+              <div class="text-xs text-[#8696a0]">Send sample to test number</div>
+            </div>
+          </button>
+          <button class="btn btn-ghost justify-start gap-3 h-auto py-3" onclick="downloadBackup()">
+            <span class="text-lg">💾</span>
+            <div class="text-left">
+              <div class="font-semibold">Backup Database</div>
+              <div class="text-xs text-[#8696a0]">Download SQLite .db file</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. CONTACTS PAGE -->
+    <section class="page" id="page-contacts">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Contacts</h1>
+          <p class="text-sm text-[#8696a0]">Manage monthly recipients and target groups</p>
+        </div>
+        <div class="flex flex-wrap gap-2.5">
+          <button class="btn btn-ghost text-xs" onclick="exportContactsCSV()">📤 Export CSV</button>
+          <button class="btn btn-ghost text-xs" onclick="openBulkImportModal()">📥 Bulk Import</button>
+          <button class="btn btn-green text-xs font-semibold" onclick="showAddContactModal()">+ Add Contact</button>
+        </div>
+      </div>
+
+      <!-- Search & Filters -->
+      <div class="card p-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <div class="sm:col-span-6 relative">
+            <input id="contacts-search" placeholder="Search name, phone, notes..." oninput="debounceContactSearch()">
+          </div>
+          <div class="sm:col-span-3">
+            <select id="contacts-group-filter" onchange="loadContacts(1)">
+              <option value="">All Groups</option>
+            </select>
+          </div>
+          <div class="sm:col-span-3">
+            <select id="contacts-status-filter" onchange="loadContacts(1)">
+              <option value="1">Active Only</option>
+              <option value="0">Inactive Only</option>
+              <option value="">All Statuses</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contacts Table -->
+      <div class="card p-0 overflow-hidden responsive-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Phone</th>
+              <th>Group</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="contacts-list">
+            <tr><td colspan="5" class="text-center py-6 text-[#8696a0]">Loading contacts...</td></tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination Bar -->
+        <div class="p-4 border-t border-[#222e35] flex flex-wrap items-center justify-between gap-3 text-sm text-[#8696a0]">
+          <div id="contacts-pagination-info">Showing 0 contacts</div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost text-xs px-3 py-1.5 h-auto" id="contacts-prev-btn" onclick="prevContactsPage()" disabled>Previous</button>
+            <button class="btn btn-ghost text-xs px-3 py-1.5 h-auto" id="contacts-next-btn" onclick="nextContactsPage()" disabled>Next</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. GROUPS PAGE -->
+    <section class="page" id="page-groups">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Contact Groups</h1>
+          <p class="text-sm text-[#8696a0]">Segment contacts for targeted messaging schedules</p>
+        </div>
+        <button class="btn btn-green text-xs font-semibold" onclick="showAddGroupModal()">+ Add Group</button>
+      </div>
+
+      <div class="card p-0 overflow-hidden responsive-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Color</th>
+              <th>Name</th>
+              <th>Assigned Contacts</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="groups-list">
+            <tr><td colspan="4" class="text-center py-6 text-[#8696a0]">Loading groups...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. TEMPLATES PAGE -->
+    <section class="page" id="page-templates">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Message Templates</h1>
+          <p class="text-sm text-[#8696a0]">Customize templates with variables and formatting</p>
+        </div>
+        <button class="btn btn-green text-xs font-semibold" onclick="showAddTemplateModal()">+ Add Template</button>
+      </div>
+
+      <div class="card p-0 overflow-hidden responsive-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Preview</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="templates-list">
+            <tr><td colspan="4" class="text-center py-6 text-[#8696a0]">Loading templates...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5. SCHEDULE & PAUSES PAGE -->
+    <section class="page" id="page-schedule">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Schedule & Automation</h1>
+          <p class="text-sm text-[#8696a0]">Configure send day, time, timezone, and exclusion rules</p>
+        </div>
+      </div>
+
+      <!-- Schedule Card -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-4 text-white flex items-center gap-2">
+          <span>⏰</span> Monthly Send Schedule
+        </h3>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Day of Month (1-28)</label>
+            <input id="sched-day" type="number" min="1" max="28" value="1">
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Send Hour (0-23)</label>
+            <input id="sched-hour" type="number" min="0" max="23" value="10">
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Send Minute (0-59)</label>
+            <input id="sched-minute" type="number" min="0" max="59" value="0">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Template</label>
+            <select id="sched-message"></select>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Target Group</label>
+            <select id="sched-group">
+              <option value="">All Contacts (Default)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Timezone</label>
+            <select id="sched-timezone">
+              <option value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</option>
+              <option value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</option>
+              <option value="Asia/Riyadh">Asia/Riyadh (AST, UTC+3)</option>
+              <option value="Europe/London">Europe/London (GMT/BST)</option>
+              <option value="America/New_York">America/New_York (EST/EDT)</option>
+              <option value="UTC">UTC</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-[#222e35]">
+          <label class="flex items-center gap-2.5 cursor-pointer text-sm font-medium">
+            <input type="checkbox" id="sched-enabled" class="w-4 h-4 accent-[#25D366]">
+            <span>Enable Automated Monthly Schedule</span>
+          </label>
+          <button class="btn btn-green text-xs font-semibold px-5" onclick="saveSchedule()">Save Schedule</button>
+        </div>
+      </div>
+
+      <!-- Global Pause Toggle Card -->
+      <div class="card">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="font-bold text-base text-white mb-0.5">Global Automation Pause</h3>
+            <p class="text-xs text-[#8696a0]">Temporarily pause all automated sends without altering your schedule settings</p>
+          </div>
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" id="pause-toggle" class="w-5 h-5 accent-[#25D366]" onchange="savePauseToggle()">
+            <span class="text-sm font-semibold" id="pause-toggle-label">Unpaused</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Per-Month Exclusions Card -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-1 text-white">Per-Month Contact Exclusions</h3>
+        <p class="text-xs text-[#8696a0] mb-4">Contacts added here will be skipped specifically for the chosen month</p>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 mb-4">
+          <div class="sm:col-span-5">
+            <select id="excl-contact"></select>
+          </div>
+          <div class="sm:col-span-4">
+            <input id="excl-month" type="month">
+          </div>
+          <div class="sm:col-span-3">
+            <button class="btn btn-red w-full text-xs font-semibold" onclick="addExclusion()">+ Exclude Contact</button>
+          </div>
+        </div>
+
+        <!-- Exclusions Table -->
+        <div class="overflow-x-auto border border-[#222e35] rounded-lg">
+          <table>
+            <thead>
+              <tr>
+                <th>Contact Name</th>
+                <th>Phone</th>
+                <th>Month</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="exclusions-list">
+              <tr><td colspan="4" class="text-center py-4 text-[#8696a0]">No exclusions for this month</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. HISTORY PAGE -->
+    <section class="page" id="page-history">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Send History & Logs</h1>
+          <p class="text-sm text-[#8696a0]">Audit monthly delivery logs, errors, and retry failed contacts</p>
+        </div>
+        <div class="flex gap-2" id="history-action-buttons">
+          <button class="btn btn-ghost text-xs text-[#25D366] border-[#25D366]/40 hidden" id="btn-retry-failed" onclick="retryFailedMessages()">↻ Retry Failed Messages</button>
+        </div>
+      </div>
+
+      <!-- Filter Controls -->
+      <div class="card p-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <div class="sm:col-span-4">
+            <input type="month" id="history-period" onchange="loadHistory(1)">
+          </div>
+          <div class="sm:col-span-4 flex gap-2">
+            <button class="btn btn-ghost text-xs flex-1" onclick="setHistoryPeriod('current')">This Month</button>
+            <button class="btn btn-ghost text-xs flex-1" onclick="setHistoryPeriod('prev')">Last Month</button>
+          </div>
+          <div class="sm:col-span-4">
+            <select id="history-status-filter" onchange="loadHistory(1)">
+              <option value="">All Statuses</option>
+              <option value="sent">Sent Only</option>
+              <option value="failed">Failed Only</option>
+              <option value="skipped">Skipped Only</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats Summary Strip -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 text-center">
+        <div class="card-inner py-3">
+          <div class="text-xs text-[#8696a0]">Total</div>
+          <div class="text-xl font-bold text-white" id="hist-stat-total">0</div>
+        </div>
+        <div class="card-inner py-3">
+          <div class="text-xs text-[#25D366]">Sent</div>
+          <div class="text-xl font-bold text-[#25D366]" id="hist-stat-sent">0</div>
+        </div>
+        <div class="card-inner py-3">
+          <div class="text-xs text-[#ea4335]">Failed</div>
+          <div class="text-xl font-bold text-[#ea4335]" id="hist-stat-failed">0</div>
+        </div>
+        <div class="card-inner py-3">
+          <div class="text-xs text-[#8696a0]">Skipped</div>
+          <div class="text-xl font-bold text-[#8696a0]" id="hist-stat-skipped">0</div>
+        </div>
+      </div>
+
+      <!-- History Table -->
+      <div class="card p-0 overflow-hidden responsive-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Recipient</th>
+              <th>Phone</th>
+              <th>Status</th>
+              <th>Sent At</th>
+              <th>Details / Error</th>
+            </tr>
+          </thead>
+          <tbody id="history-list">
+            <tr><td colspan="5" class="text-center py-6 text-[#8696a0]">Loading history...</td></tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination Bar -->
+        <div class="p-4 border-t border-[#222e35] flex flex-wrap items-center justify-between gap-3 text-sm text-[#8696a0]">
+          <div id="history-pagination-info">Page 1 of 1</div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost text-xs px-3 py-1.5 h-auto" id="history-prev-btn" onclick="prevHistoryPage()" disabled>Previous</button>
+            <button class="btn btn-ghost text-xs px-3 py-1.5 h-auto" id="history-next-btn" onclick="nextHistoryPage()" disabled>Next</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. SETTINGS PAGE -->
+    <section class="page" id="page-settings">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">System Settings</h1>
+          <p class="text-sm text-[#8696a0]">Anti-ban parameters, retry controls, and data management</p>
+        </div>
+        <button class="btn btn-green text-xs font-semibold px-5" onclick="saveSettings()">Save All Settings</button>
+      </div>
+
+      <!-- Anti-Ban Controls Card -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-1 text-white flex items-center gap-2">
+          <span>🛡️</span> Anti-Ban Safety & Delay Settings
+        </h3>
+        <p class="text-xs text-[#8696a0] mb-4">Pacing parameters to keep your WhatsApp account safe from automated blast detection</p>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Min Random Delay (Seconds)</label>
+            <input id="set-delay-min" type="number" min="5" max="300" placeholder="30">
+            <span class="text-[11px] text-[#8696a0]">Recommended: 30s</span>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Max Random Delay (Seconds)</label>
+            <input id="set-delay-max" type="number" min="10" max="600" placeholder="90">
+            <span class="text-[11px] text-[#8696a0]">Recommended: 90s</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-2">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Typing Simulation (Seconds)</label>
+            <input id="set-typing-ms" type="number" min="1" max="15" placeholder="3">
+            <span class="text-[11px] text-[#8696a0]">Simulates "typing..." status before sending</span>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Daily Message Cap</label>
+            <input id="set-daily-cap" type="number" min="1" max="1000" placeholder="100">
+            <span class="text-[11px] text-[#8696a0]">Limits sends per 24h</span>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Max Retries on Failure</label>
+            <input id="set-max-retries" type="number" min="1" max="10" placeholder="3">
+            <span class="text-[11px] text-[#8696a0]">Retry attempts before logging failed</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Automation & Catch-up Card -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-1 text-white flex items-center gap-2">
+          <span>🔄</span> Automation & Recovery
+        </h3>
+        <p class="text-xs text-[#8696a0] mb-4">How the server behaves when booted after a missed send time</p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Catch-up Window (Hours)</label>
+            <input id="set-catchup-hours" type="number" min="1" max="336" placeholder="72">
+            <span class="text-[11px] text-[#8696a0]">If the computer is powered on within this window, missed send runs automatically</span>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Owner Phone Number (Optional)</label>
+            <input id="set-owner-phone" type="text" placeholder="923001234567">
+            <span class="text-[11px] text-[#8696a0]">Used for test messages and pairing code</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Data Backup & Reset Card -->
+      <div class="card">
+        <h3 class="font-bold text-base mb-1 text-white flex items-center gap-2">
+          <span>💾</span> Data Backup & Maintenance
+        </h3>
+        <p class="text-xs text-[#8696a0] mb-4">Export backups or reset your WhatsApp session</p>
+
+        <div class="flex flex-wrap gap-3">
+          <button class="btn btn-ghost text-xs" onclick="downloadBackup()">💾 Download SQLite Database Backup</button>
+          <button class="btn btn-ghost text-xs" onclick="reconnectSession()">↻ Force WhatsApp Reconnect</button>
+          <button class="btn btn-ghost text-xs text-[#ea4335]" onclick="relinkSession()">⚠️ Reset WhatsApp Credentials / Re-pair</button>
+        </div>
+      </div>
+
+      <!-- Password Management Card in Settings -->
+      <div class="card">
+        <h3 class="font-bold text-base text-white mb-2">Change Master Password</h3>
+        <p class="text-xs text-[#8696a0] mb-4">Update the administrative password for dashboard access.</p>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mb-4">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Current Password</label>
+            <input type="password" id="change-pwd-current" placeholder="Current password">
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">New Password</label>
+            <input type="password" id="change-pwd-new" placeholder="New password (min 6 chars)">
+          </div>
+        </div>
+        <button class="btn btn-ghost text-xs font-semibold" onclick="submitChangePassword()">Update Password</button>
+      </div>
+    </section>
+
+    <!-- 8. SYSTEM LOGS PAGE -->
+    <section class="page" id="page-logs">
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">System Diagnostics & Logs</h1>
+          <p class="text-sm text-[#8696a0]">Live activity feed, WhatsApp session events, and send diagnostics</p>
+        </div>
+        <div class="flex gap-2.5">
+          <button class="btn btn-ghost text-xs" onclick="loadSystemLogs()">↻ Refresh</button>
+          <button class="btn btn-outline-green text-xs" id="btn-toggle-log-auto" onclick="toggleLogAutoRefresh()">Auto-refresh: ON</button>
+        </div>
+      </div>
+
+      <div class="card p-0 overflow-hidden">
+        <div class="p-3 bg-[#111b21] border-b border-[#222e35] flex items-center justify-between gap-3">
+          <div class="flex gap-2 text-xs">
+            <button class="btn btn-ghost px-2.5 py-1 text-xs active font-semibold" id="log-filter-all" onclick="filterLogs('all')">All</button>
+            <button class="btn btn-ghost px-2.5 py-1 text-xs" id="log-filter-info" onclick="filterLogs('info')">Info</button>
+            <button class="btn btn-ghost px-2.5 py-1 text-xs text-amber-400" id="log-filter-warn" onclick="filterLogs('warn')">Warnings</button>
+            <button class="btn btn-ghost px-2.5 py-1 text-xs text-red-400" id="log-filter-error" onclick="filterLogs('error')">Errors</button>
+          </div>
+          <span class="text-xs text-[#8696a0]" id="log-count-indicator">Loading logs...</span>
+        </div>
+        <div class="bg-[#0b141a] p-4 font-mono text-xs max-h-[600px] overflow-y-auto space-y-1.5" id="system-logs-container">
+          <div class="text-[#8696a0]">Fetching recent system events...</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ================= MODALS ================= -->
+
+<!-- Send Test Message Modal -->
+<div id="test-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-md my-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg text-white">Send Quick Test Message</h3>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="closeTestModal()">&times;</button>
+    </div>
+    
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Target Phone Number</label>
+      <input id="test-phone" placeholder="923001234567 or select contact below">
+    </div>
+
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Or Select Saved Contact</label>
+      <select id="test-contact-select" onchange="fillTestPhoneFromContact()">
+        <option value="">-- Select Contact --</option>
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Template to Test</label>
+      <select id="test-template-select"></select>
+    </div>
+
+    <div class="flex justify-end gap-3 mt-5">
+      <button class="btn btn-ghost" onclick="closeTestModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" id="btn-do-test-send" onclick="executeTestSend()">Send Test Message</button>
+    </div>
+  </div>
+</div>
+
+<!-- Contact Modal (Add / Edit) -->
+<div id="contact-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg my-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg text-white" id="contact-modal-title">Add Contact</h3>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="hideContactModal()">&times;</button>
+    </div>
+    
+    <input type="hidden" id="contact-edit-id">
+    
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+      <div>
+        <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Full Name *</label>
+        <input id="modal-contact-name" placeholder="Ahmed Khan">
+      </div>
+      <div>
+        <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Phone Number *</label>
+        <input id="modal-contact-phone" placeholder="923001234567 or 0300...">
+        <span class="text-[11px] text-[#8696a0]">Auto-normalizes Pakistani local formats</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+      <div>
+        <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Group</label>
+        <select id="modal-contact-group">
+          <option value="">None (Default)</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Status</label>
+        <select id="modal-contact-active">
+          <option value="1">Active (Included in sends)</option>
+          <option value="0">Inactive (Paused)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Notes (Optional)</label>
+      <textarea id="modal-contact-notes" rows="2" placeholder="Optional reference notes"></textarea>
+    </div>
+
+    <div class="flex justify-end gap-3 mt-5">
+      <button class="btn btn-ghost" onclick="hideContactModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" onclick="saveContactFromModal()">Save Contact</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Import Modal with Preview -->
+<div id="bulk-import-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-2xl my-auto max-h-[90vh] flex flex-col">
+    <div class="flex justify-between items-center mb-3">
+      <div>
+        <h3 class="font-bold text-lg text-white">Bulk Import Contacts</h3>
+        <p class="text-xs text-[#8696a0]">Paste contacts one per line. Formats: <code>Name, Phone</code> or <code>Name, Phone, Notes</code></p>
+      </div>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="closeBulkImportModal()">&times;</button>
+    </div>
+
+    <div class="mb-3">
+      <textarea id="bulk-import-text" rows="6" class="font-mono text-xs" placeholder="Ahmed Khan, 03001234567&#10;Ali Raza, +92 301 9876543, Friend&#10;Fatima Noor, 923215554433"></textarea>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div class="flex items-center gap-3">
+        <button class="btn btn-ghost text-xs" onclick="parseBulkImportPreview()">🔍 Parse & Preview</button>
+        <label class="flex items-center gap-2 cursor-pointer text-xs text-[#8696a0] hover:text-white">
+          <input type="checkbox" id="bulk-update-existing" class="w-4 h-4 accent-[#25D366]">
+          <span>Update details if phone already exists</span>
+        </label>
+      </div>
+      <div class="text-xs text-[#8696a0]" id="bulk-preview-summary"></div>
+    </div>
+
+    <!-- Preview Table -->
+    <div id="bulk-preview-container" class="hidden flex-1 overflow-y-auto border border-[#222e35] rounded-lg mb-4">
+      <table>
+        <thead>
+          <tr>
+            <th>Line</th>
+            <th>Name</th>
+            <th>Normalized Phone</th>
+            <th>Notes</th>
+            <th>Validation</th>
+          </tr>
+        </thead>
+        <tbody id="bulk-preview-list"></tbody>
+      </table>
+    </div>
+
+    <div class="flex justify-end gap-3 pt-3 border-t border-[#222e35]">
+      <button class="btn btn-ghost" onclick="closeBulkImportModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" id="btn-commit-import" onclick="commitBulkImport()" disabled>Import Valid Contacts</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group Modal (Add / Edit) -->
+<div id="group-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-md my-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg text-white" id="group-modal-title">Add Group</h3>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="hideGroupModal()">&times;</button>
+    </div>
+    
+    <input type="hidden" id="group-edit-id">
+    
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Group Name</label>
+      <input id="modal-group-name" placeholder="e.g. VIP, Relatives, Donors">
+    </div>
+
+    <div class="mb-3">
+      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Badge Color</label>
+      <div class="flex gap-2">
+        <input id="modal-group-color" type="color" value="#25D366" class="w-12 h-10 p-1 cursor-pointer">
+        <input id="modal-group-color-hex" value="#25D366" class="flex-1 font-mono">
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-3 mt-5">
+      <button class="btn btn-ghost" onclick="hideGroupModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" onclick="saveGroupFromModal()">Save Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group Assign Contacts Modal -->
+<div id="group-assign-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-lg my-auto max-h-[90vh] flex flex-col">
+    <div class="flex justify-between items-center mb-3">
+      <div>
+        <h3 class="font-bold text-lg text-white">Assign Contacts to Group</h3>
+        <p class="text-xs text-[#25D366] font-medium" id="assign-modal-group-name"></p>
+      </div>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="hideAssignModal()">&times;</button>
+    </div>
+
+    <div class="mb-3">
+      <input id="assign-search" placeholder="Filter contacts by name or phone..." oninput="filterAssignList()">
+    </div>
+
+    <div class="flex-1 overflow-y-auto border border-[#222e35] rounded-lg p-2 max-h-72" id="assign-contacts-list">
+      <!-- Checkbox list -->
+    </div>
+
+    <div class="flex justify-between items-center mt-4 pt-3 border-t border-[#222e35]">
+      <div class="text-xs text-[#8696a0]" id="assign-selected-count">0 selected</div>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost" onclick="hideAssignModal()">Cancel</button>
+        <button class="btn btn-green font-semibold" onclick="saveAssignmentsFromModal()">Save Assignments</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Template Modal (Add / Edit) with Live Contact Preview -->
+<div id="template-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-2xl my-auto max-h-[95vh] flex flex-col">
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-bold text-lg text-white" id="template-modal-title">Edit Template</h3>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="hideTemplateModal()">&times;</button>
+    </div>
+    
+    <input type="hidden" id="template-edit-id">
+
+    <div class="overflow-y-auto flex-1 pr-1">
+      <div class="mb-3">
+        <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Template Title</label>
+        <input id="modal-template-title" placeholder="e.g. Monthly Aeanat Reminder">
+      </div>
+
+      <div class="mb-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <label class="text-xs text-[#8696a0] font-semibold block">Message Body</label>
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{name}}')">+ Name</button>
+            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{month}}')">+ Month</button>
+            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{phone}}')">+ Phone</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto font-bold" onclick="wrapText('*')" title="Bold">B</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto italic" onclick="wrapText('_')" title="Italic">I</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto line-through" onclick="wrapText('~')" title="Strikethrough">S</button>
+          </div>
+        </div>
+        <textarea id="modal-template-body" rows="5" class="font-sans" oninput="updateInteractivePreview()"></textarea>
+      </div>
+
+      <!-- Interactive Mockup Preview -->
+      <div class="mb-3">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs text-[#8696a0] font-semibold block">Interactive WhatsApp Preview</label>
+          <div class="flex items-center gap-2">
+            <select id="preview-contact-picker" class="text-xs py-1 px-2 w-44" onchange="updateInteractivePreview()">
+              <option value="">Sample Contact</option>
+            </select>
+            <select id="preview-lang-picker" class="text-xs py-1 px-2 w-32" onchange="updateInteractivePreview()">
+              <option value="urdu">Urdu Month</option>
+              <option value="en">English Month</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl bg-[#0b141a] border border-[#222e35] flex justify-start">
+          <div class="chat-bubble shadow-md">
+            <div id="mockup-preview-body">Message preview...</div>
+            <div class="text-[10px] text-white/60 text-right mt-1 flex items-center justify-end gap-1">
+              <span id="mockup-time">10:00 AM</span>
+              <span>✓✓</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-3 pt-3 border-t border-[#222e35] mt-2">
+      <button class="btn btn-ghost" onclick="hideTemplateModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" onclick="saveTemplateFromModal()">Save Template</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Send Now Modal -->
+<div id="send-now-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-md my-auto border-[#25D366]/40">
+    <h3 class="font-bold text-lg text-white mb-2">Confirm Monthly Send</h3>
+    <p class="text-sm text-[#8696a0] mb-4">You are about to trigger the monthly message dispatch. Messages will be sent with human-paced anti-ban delays.</p>
+
+    <div class="card-inner mb-4 space-y-2 text-sm">
+      <div class="flex justify-between">
+        <span class="text-[#8696a0]">Target Group:</span>
+        <span class="font-medium text-white" id="confirm-send-group">All Active Contacts</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-[#8696a0]">Eligible Recipients:</span>
+        <span class="font-medium text-[#25D366]" id="confirm-send-count">0 contacts</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-[#8696a0]">Estimated Duration:</span>
+        <span class="font-medium text-white" id="confirm-send-duration">~0 minutes</span>
+      </div>
+    </div>
+
+    <div class="flex justify-end gap-3">
+      <button class="btn btn-ghost" onclick="closeSendNowModal()">Cancel</button>
+      <button class="btn btn-green font-semibold" onclick="executeSendNow()">Start Sending Now</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<script>
+const API = '/api';
+let allContacts = [];
+let allContactsMap = {};
+let allGroups = [];
+let allGroupsMap = {};
+let allTemplates = [];
+let contactsPage = 1;
+let contactsLimit = 25;
+let contactsSearch = '';
+let contactsGroupId = '';
+let contactsStatus = '';
+let historyPage = 1;
+let historyLimit = 25;
+let historyPeriod = '';
+let historyStatus = '';
+let parsedBulkContacts = [];
+let activeAssignGroupId = null;
+let activeAssignAssignedSet = new Set();
+let sendStream = null;
+let statusInterval = null;
+
+// Escaping utility
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// Toast notification
+function showToast(message, type = 'info') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none';
+    document.body.appendChild(container);
+  }
+  
+  const toast = document.createElement('div');
+  const bgClass = {
+    success: 'bg-[#25D366] text-[#111b21] border-[#25D366]',
+    error: 'bg-[#ea4335] text-white border-[#ea4335]',
+    warning: 'bg-amber-500 text-[#111b21] border-amber-500',
+    info: 'bg-[#202c33] text-white border-[#3b4a54]'
+  }[type] || 'bg-[#202c33] text-white border-[#3b4a54]';
+  
+  toast.className = `pointer-events-auto px-4 py-3 rounded-lg shadow-xl border text-sm font-medium flex items-center gap-2 transform transition-all duration-300 translate-y-2 opacity-0 ${bgClass}`;
+  toast.innerHTML = `<span>${esc(message)}</span>`;
+  
+  container.appendChild(toast);
+  
+  requestAnimationFrame(() => {
+    toast.classList.remove('translate-y-2', 'opacity-0');
+  });
+  
+  setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-y-2');
+    setTimeout(() => toast.remove(), 300);
+  }, 3500);
+}
+
+// Unified API caller
+async function api(path, opts = {}) {
+  try {
+    const r = await fetch(API + path, opts);
+    if (r.status === 401) {
+      checkAuth();
+      throw new Error('Authentication required');
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      throw new Error(data.error || `HTTP ${r.status}`);
+    }
+    return data;
+  } catch (e) {
+    if (e.message !== 'Authentication required') {
+      console.error(`API ${path} error:`, e);
+    }
+    throw e;
+  }
+}
+
+// Mobile sidebar toggle
+function toggleSidebar() {
+  const sidebar = document.getElementById('mobile-sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar.classList.toggle('hidden');
+  overlay.classList.toggle('hidden');
+}
+
+// Page Navigation
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('page-' + id);
+  if (target) target.classList.add('active');
+  
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll(`[onclick*="showPage('${id}')"]`).forEach(n => n.classList.add('active'));
+  
+  if (!document.getElementById('mobile-sidebar').classList.contains('hidden')) {
+    toggleSidebar();
+  }
+  
+  if (id === 'status') loadStatus();
+  else if (id === 'contacts') loadContacts(1);
+  else if (id === 'groups') loadGroups();
+  else if (id === 'templates') loadTemplates();
+  else if (id === 'schedule') loadSchedule();
+  else if (id === 'history') loadHistory(1);
+  else if (id === 'settings') loadSettings();
+  else if (id === 'logs') loadSystemLogs();
+}
+
+// ── Authentication ──
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/status');
+    const data = await res.json();
+    if (!data.authenticated) {
+      showAuthPage(data.firstBoot);
+      return false;
+    }
+    return true;
+  } catch(e) {
+    showAuthPage(false);
+    return false;
+  }
+}
+
+function showAuthPage(firstBoot) {
+  if (statusInterval) clearInterval(statusInterval);
+  document.getElementById('app').innerHTML = `
+    <div class="flex items-center justify-center min-h-screen w-full p-4 bg-[#0b141a]">
+      <div class="card w-full max-w-md my-auto p-8 border-[#222e35] shadow-2xl">
+        <div class="text-center mb-6">
+          <div class="w-12 h-12 rounded-full bg-[#25D366] text-[#111b21] font-bold text-xl flex items-center justify-center mx-auto mb-3">WA</div>
+          <h2 class="text-2xl font-bold text-white">${firstBoot ? 'Initial Admin Setup' : 'WhatsApp Sender Login'}</h2>
+          <p class="text-sm text-[#8696a0] mt-1">${firstBoot ? 'Set your secure dashboard access password.' : 'Enter your password to access the console.'}</p>
+        </div>
+        <div class="mb-4">
+          <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Master Password</label>
+          <input type="password" id="auth-password" placeholder="${firstBoot ? 'Create a password (min 6 chars)' : 'Enter password'}" autofocus>
+        </div>
+        <button class="btn btn-green w-full font-semibold" onclick="${firstBoot ? 'setupPassword()' : 'login()'}">
+          ${firstBoot ? 'Configure & Continue' : 'Sign In'}
+        </button>
+      </div>
+    </div>
+  `;
+  document.getElementById('auth-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') firstBoot ? setupPassword() : login();
+  });
+}
+
+async function login() {
+  const pwd = document.getElementById('auth-password').value;
+  if (!pwd) return showToast('Please enter password', 'error');
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ password: pwd })
+    });
+    if (res.ok) location.reload();
+    else showToast('Incorrect password', 'error');
+  } catch(e) {
+    showToast('Login failed: ' + e.message, 'error');
+  }
+}
+
+async function setupPassword() {
+  const pwd = document.getElementById('auth-password').value;
+  if (!pwd || pwd.length < 6) return showToast('Password must be at least 6 characters', 'error');
+  try {
+    const res = await fetch('/api/auth/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ password: pwd })
+    });
+    if (res.ok) location.reload();
+    else showToast('Setup failed', 'error');
+  } catch(e) {
+    showToast('Setup error: ' + e.message, 'error');
+  }
+}
+
+async function logout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } finally {
+    location.reload();
+  }
+}
+
+// ── Live Send Progress & SSE ──
+function updateSendProgressUI(data) {
+  const banner = document.getElementById('active-send-banner');
+  banner.classList.remove('hidden');
+  
+  const total = data.total || 0;
+  const sent = data.sent || 0;
+  const failed = data.failed || 0;
+  const skipped = data.skipped || 0;
+  const completedCount = sent + failed + skipped;
+  const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+  
+  document.getElementById('live-send-bar').style.width = pct + '%';
+  document.getElementById('live-send-counts').textContent = `${completedCount} / ${total} processed (${sent} sent, ${failed} failed, ${skipped} skipped)`;
+  document.getElementById('live-send-pct').textContent = pct + '%';
+  
+  if (data.current) {
+    document.getElementById('live-send-current').textContent = data.current;
+    appendLiveLog(data.current);
+  }
+}
+
+function appendLiveLog(msg) {
+  const logEl = document.getElementById('live-send-log');
+  if (!logEl) return;
+  const time = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = 'flex items-center justify-between text-[11px] py-0.5 border-b border-[#222e35]/50';
+  line.innerHTML = `<span>${esc(msg)}</span><span class="text-white/40 ml-2">${time}</span>`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.children.length > 40) {
+    logEl.removeChild(logEl.firstChild);
+  }
+}
+
+function connectSendStream() {
+  if (sendStream) {
+    try { sendStream.close(); } catch(e){}
+    sendStream = null;
+  }
+  
+  const banner = document.getElementById('active-send-banner');
+  banner.classList.remove('hidden');
+  
+  sendStream = new EventSource('/api/send/stream');
+  
+  sendStream.addEventListener('progress', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateSendProgressUI(data);
+    } catch(err){}
+  });
+  
+  sendStream.addEventListener('complete', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateSendProgressUI(data);
+      appendLiveLog('Monthly dispatch completed successfully!');
+      showToast('All messages processed!', 'success');
+      setTimeout(() => {
+        loadStatus();
+        if (sendStream) { sendStream.close(); sendStream = null; }
+      }, 3500);
+    } catch(err){}
+  });
+  
+  sendStream.addEventListener('aborted', (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      updateSendProgressUI(data);
+      appendLiveLog('Dispatch was manually ABORTED.');
+      showToast('Sending job aborted.', 'warning');
+      setTimeout(() => {
+        loadStatus();
+        if (sendStream) { sendStream.close(); sendStream = null; }
+      }, 3500);
+    } catch(err){}
+  });
+  
+  sendStream.onerror = () => {
+    if (sendStream) { sendStream.close(); sendStream = null; }
+    setTimeout(pollSendProgress, 2500);
+  };
+}
+
+async function pollSendProgress() {
+  try {
+    const res = await api('/send/progress');
+    if (res.isSending && res.progress) {
+      updateSendProgressUI(res.progress);
+      setTimeout(pollSendProgress, 2000);
+    } else {
+      document.getElementById('active-send-banner').classList.add('hidden');
+      loadStatus();
+    }
+  } catch(e) {}
+}
+
+async function abortActiveSend() {
+  if (!confirm('Are you sure you want to STOP and abort the current sending batch? Messages already delivered cannot be unsent.')) return;
+  try {
+    const res = await api('/send/abort', { method: 'POST' });
+    showToast(res.message || 'Abort requested', 'warning');
+  } catch(e) {
+    showToast('Failed to abort: ' + e.message, 'error');
+  }
+}
+
+// ── Status Page ──
+async function loadStatus() {
+  try {
+    const s = await api('/status');
+    const dot = document.getElementById('status-dot');
+    const sdot = document.getElementById('sidebar-dot');
+    const stext = document.getElementById('status-text');
+    const sside = document.getElementById('sidebar-status');
+    const phoneInfo = document.getElementById('status-phone-info');
+    
+    const dotClasses = {
+      connected: 'dot-green',
+      needs_qr: 'dot-yellow',
+      connecting: 'dot-yellow',
+      disconnected: 'dot-gray',
+      error: 'dot-red'
+    };
+    
+    const statusLabels = {
+      connected: 'WhatsApp Connected & Online',
+      needs_qr: 'Scan QR Code to Link Account',
+      connecting: 'Connecting to WhatsApp...',
+      disconnected: 'Disconnected',
+      error: 'WhatsApp Error'
+    };
+    
+    const curClass = dotClasses[s.session] || 'dot-gray';
+    dot.className = 'status-dot ' + curClass;
+    if (sdot) sdot.className = 'status-dot ' + curClass;
+    stext.textContent = statusLabels[s.session] || s.session;
+    if (sside) sside.textContent = s.session === 'connected' ? 'Online' : (s.session === 'needs_qr' ? 'Needs QR' : 'Offline');
+    
+    // QR Code rendering
+    const qrContainer = document.getElementById('qr-container');
+    const qrImg = document.getElementById('qr-image');
+    const pairBox = document.getElementById('pairing-code-box');
+    const pairText = document.getElementById('pairing-code-text');
+    
+    if (s.session === 'needs_qr') {
+      qrContainer.classList.remove('hidden');
+      if (s.qrDataUrl) {
+        qrImg.src = s.qrDataUrl;
+        qrImg.classList.remove('hidden');
+      }
+      if (s.pairingCode) {
+        pairBox.classList.remove('hidden');
+        pairText.textContent = s.pairingCode;
+      } else {
+        pairBox.classList.add('hidden');
+      }
+    } else {
+      qrContainer.classList.add('hidden');
+    }
+    
+    // Connected phone badge
+    if (s.session === 'connected' && s.phone) {
+      phoneInfo.textContent = 'Account: +' + s.phone;
+      phoneInfo.classList.remove('hidden');
+    } else {
+      phoneInfo.classList.add('hidden');
+    }
+    
+    // Global pause banner
+    const pauseBanner = document.getElementById('global-pause-banner');
+    if (s.isPaused) {
+      pauseBanner.classList.remove('hidden');
+    } else {
+      pauseBanner.classList.add('hidden');
+    }
+    
+    // Active send check
+    if (s.isSending) {
+      if (s.currentProgress) updateSendProgressUI(s.currentProgress);
+      if (!sendStream) connectSendStream();
+    } else {
+      if (!sendStream) {
+        document.getElementById('active-send-banner').classList.add('hidden');
+      }
+    }
+    
+    // Scheduling & Stats
+    const tz = 'Asia/Karachi';
+    document.getElementById('stat-next-run').textContent = s.nextRun 
+      ? new Date(s.nextRun).toLocaleString('en-PK', { timeZone: tz, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'Not Scheduled';
+      
+    document.getElementById('stat-last-run').textContent = s.lastRun 
+      ? new Date(s.lastRun).toLocaleString('en-PK', { timeZone: tz, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'Never';
+      
+    const activeContactsRes = await api('/contacts?page=1&limit=1&status=active');
+    const totalContacts = activeContactsRes.total || 0;
+    document.getElementById('stat-contacts-count').textContent = totalContacts;
+    document.getElementById('sidebar-contacts-count').textContent = totalContacts;
+    
+    const now = new Date();
+    const period = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthStats = await api(`/history/${period}?page=1&limit=10000`);
+    const logs = monthStats.data || [];
+    const sentCount = logs.filter(l => l.status === 'sent').length;
+    document.getElementById('stat-month-sent').textContent = sentCount;
+    document.getElementById('stat-month-total').textContent = `/ ${logs.length} sent`;
+    document.getElementById('stat-last-period').textContent = period;
+  } catch(e) {
+    console.error('loadStatus error:', e);
+  }
+}
+
+async function reconnectSession() {
+  try {
+    showToast('Triggering WhatsApp reconnect...', 'info');
+    await api('/session/reconnect', { method: 'POST' });
+    showToast('Reconnection requested. Refreshing...', 'success');
+    setTimeout(loadStatus, 2000);
+  } catch(e) {
+    showToast('Reconnect failed: ' + e.message, 'error');
+  }
+}
+
+async function relinkSession() {
+  if (!confirm('This will wipe stored WhatsApp credentials and generate a fresh QR code. You will need to scan it from your phone. Proceed?')) return;
+  try {
+    showToast('Resetting WhatsApp credentials...', 'info');
+    await api('/session/relink', { method: 'POST' });
+    showToast('Session reset. New QR code ready.', 'success');
+    setTimeout(loadStatus, 1500);
+  } catch(e) {
+    showToast('Relink error: ' + e.message, 'error');
+  }
+}
+
+async function resumeGlobalPause() {
+  try {
+    await api('/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ global_paused: 'false' })
+    });
+    showToast('Automated sending resumed', 'success');
+    loadStatus();
+  } catch(e) {
+    showToast('Failed to resume: ' + e.message, 'error');
+  }
+}
+
+async function savePauseToggle() {
+  const isPaused = document.getElementById('pause-toggle').checked;
+  const label = document.getElementById('pause-toggle-label');
+  if (label) {
+    label.textContent = isPaused ? 'Monthly automated sending is PAUSED' : 'Monthly automated sending is ACTIVE';
+  }
+  try {
+    await api('/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ global_paused: String(isPaused) })
+    });
+    showToast(isPaused ? 'Scheduled sending paused' : 'Scheduled sending resumed');
+    loadStatus();
+  } catch(e) {
+    showToast('Failed to update pause state: ' + e.message, 'error');
+  }
+}
+
+// ── Send Now Flow ──
+async function confirmSendNow() {
+  try {
+    const sched = await api('/schedule');
+    const groups = await api('/groups');
+    allGroupsMap = Object.fromEntries(groups.map(g => [g.id, g]));
+    const groupName = sched && sched.group_id && allGroupsMap[sched.group_id]
+      ? allGroupsMap[sched.group_id].name 
+      : 'All Active Contacts';
+    document.getElementById('confirm-send-group').textContent = groupName;
+    
+    const countRes = await api('/contacts?limit=1&status=active' + (sched && sched.group_id ? `&groupId=${sched.group_id}` : ''));
+    const total = countRes.total || 0;
+    document.getElementById('confirm-send-count').textContent = `${total} eligible contacts`;
+    
+    const estSec = total * 6.5;
+    const estMin = Math.ceil(estSec / 60);
+    document.getElementById('confirm-send-duration').textContent = `~${estMin} minute${estMin === 1 ? '' : 's'}`;
+    
+    document.getElementById('send-now-modal').classList.remove('hidden');
+  } catch(e) {
+    document.getElementById('confirm-send-group').textContent = 'All Active Contacts';
+    document.getElementById('confirm-send-count').textContent = 'Calculating...';
+    document.getElementById('confirm-send-duration').textContent = '—';
+    document.getElementById('send-now-modal').classList.remove('hidden');
+  }
+}
+
+function closeSendNowModal() {
+  document.getElementById('send-now-modal').classList.add('hidden');
+}
+
+async function executeSendNow() {
+  closeSendNowModal();
+  try {
+    const res = await api('/send-now', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    showToast(res.message || 'Dispatch initiated!', 'success');
+    connectSendStream();
+    loadStatus();
+  } catch(e) {
+    showToast('Failed to trigger send: ' + e.message, 'error');
+  }
+}
+
+// ── Quick Test Message Flow ──
+async function openTestModal(prefillPhone = '') {
+  document.getElementById('test-modal').classList.remove('hidden');
+  document.getElementById('test-phone').value = prefillPhone;
+  
+  try {
+    const contactsRes = await api('/contacts?limit=9999&status=active');
+    const contacts = contactsRes.data || contactsRes;
+    const contactSel = document.getElementById('test-contact-select');
+    contactSel.innerHTML = '<option value="">-- Select Saved Contact --</option>' + 
+      contacts.map(c => `<option value="${esc(c.phone)}">${esc(c.name)} (${esc(c.phone)})</option>`).join('');
+      
+    const templates = await api('/messages');
+    const tplSel = document.getElementById('test-template-select');
+    tplSel.innerHTML = templates.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join('');
+  } catch(e) {}
+}
+
+function closeTestModal() {
+  document.getElementById('test-modal').classList.add('hidden');
+}
+
+function fillTestPhoneFromContact() {
+  const sel = document.getElementById('test-contact-select');
+  if (sel.value) {
+    document.getElementById('test-phone').value = sel.value;
+  }
+}
+
+async function executeTestSend() {
+  const phone = document.getElementById('test-phone').value.trim();
+  const templateId = document.getElementById('test-template-select').value;
+  const btn = document.getElementById('btn-do-test-send');
+  
+  if (!phone) return showToast('Please provide a phone number', 'error');
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Delivering...';
+  }
+  
+  try {
+    const payload = { phone };
+    if (templateId) payload.messageId = parseInt(templateId);
+    
+    const res = await api('/send/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    showToast(res.message || 'Test message delivered!', 'success');
+    closeTestModal();
+  } catch(e) {
+    showToast('Test failed: ' + e.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Send Test Message';
+    }
+  }
+}
+
+// ── Contacts Management ──
+function debounceContactSearch() {
+  clearTimeout(window._contactSearchTimer);
+  window._contactSearchTimer = setTimeout(() => {
+    contactsSearch = document.getElementById('contacts-search').value.trim();
+    contactsGroupId = document.getElementById('contacts-group-filter').value;
+    contactsStatus = document.getElementById('contacts-status-filter').value;
+    loadContacts(1);
+  }, 300);
+}
+
+async function loadContacts(page = 1) {
+  try {
+    contactsPage = page;
+    const params = new URLSearchParams({
+      page: page,
+      limit: contactsLimit,
+      search: contactsSearch,
+      groupId: contactsGroupId,
+      status: contactsStatus
+    });
+    
+    const result = await api(`/contacts?${params.toString()}`);
+    allContacts = result.data || [];
+    allContacts.forEach(c => { allContactsMap[c.id] = c; });
+    
+    // Ensure groups are loaded for filtering
+    if (allGroups.length === 0) {
+      allGroups = await api('/groups');
+      allGroupsMap = Object.fromEntries(allGroups.map(g => [g.id, g]));
+      const grpFilter = document.getElementById('contacts-group-filter');
+      grpFilter.innerHTML = '<option value="">All Groups</option>' + 
+        allGroups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+    }
+    
+    const tbody = document.getElementById('contacts-list');
+    if (allContacts.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-[#8696a0]">No contacts found matching criteria</td></tr>';
+    } else {
+      tbody.innerHTML = allContacts.map(c => {
+        const groupsHtml = (c.groups && c.groups.length > 0)
+          ? c.groups.map(g => `<span class="tag mr-1" style="background:${g.color}22; color:${g.color}; border:1px solid ${g.color}44">${esc(g.name)}</span>`).join('')
+          : '<span class="text-xs text-[#8696a0]">—</span>';
+          
+        let statusBadge = '';
+        let actionButtons = `
+          <button class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="editContact(${c.id})">Edit</button>
+          <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="openTestModal('${esc(c.phone)}')">Test</button>
+          <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delContact(${c.id})">Delete</button>
+        `;
+
+        if (c.opted_out) {
+          statusBadge = '<span class="tag tag-failed">Opted Out (STOP)</span>';
+          actionButtons = `
+            <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="reEnableContact(${c.id})">Re-enable</button>
+            <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delContact(${c.id})">Delete</button>
+          `;
+        } else if (c.active) {
+          statusBadge = '<span class="tag tag-active">Active</span>';
+        } else {
+          statusBadge = '<span class="tag tag-inactive">Inactive</span>';
+        }
+          
+        return `
+          <tr>
+            <td data-label="Name" class="font-medium text-white">${esc(c.name)}</td>
+            <td data-label="Phone" class="font-mono text-xs text-[#8696a0]">+${esc(c.phone)}</td>
+            <td data-label="Groups">${groupsHtml}</td>
+            <td data-label="Status">${statusBadge}</td>
+            <td data-label="Actions">
+              <div class="flex items-center gap-2">
+                ${actionButtons}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+    
+    // Pagination info
+    const totalPages = result.pages || 1;
+    document.getElementById('contacts-pagination-info').textContent = `Page ${result.page || 1} of ${totalPages} (${result.total || 0} contacts)`;
+    document.getElementById('contacts-prev-btn').disabled = (result.page || 1) <= 1;
+    document.getElementById('contacts-next-btn').disabled = (result.page || 1) >= totalPages;
+  } catch(e) {}
+}
+
+function prevContactsPage() { if (contactsPage > 1) loadContacts(contactsPage - 1); }
+function nextContactsPage() { loadContacts(contactsPage + 1); }
+
+async function showAddContactModal() {
+  document.getElementById('contact-modal').classList.remove('hidden');
+  document.getElementById('contact-modal-title').textContent = 'Add New Contact';
+  document.getElementById('contact-edit-id').value = '';
+  document.getElementById('modal-contact-name').value = '';
+  document.getElementById('modal-contact-phone').value = '';
+  document.getElementById('modal-contact-active').value = '1';
+  
+  const grps = allGroups.length ? allGroups : await api('/groups');
+  const sel = document.getElementById('modal-contact-group');
+  sel.innerHTML = '<option value="">None (Default)</option>' + grps.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+}
+
+function hideContactModal() {
+  document.getElementById('contact-modal').classList.add('hidden');
+}
+
+async function editContact(id) {
+  const c = allContactsMap[id] || (await api(`/contacts`)).data?.find(x => x.id === id);
+  if (!c) return;
+  
+  document.getElementById('contact-modal').classList.remove('hidden');
+  document.getElementById('contact-modal-title').textContent = 'Edit Contact';
+  document.getElementById('contact-edit-id').value = c.id;
+  document.getElementById('modal-contact-name').value = c.name;
+  document.getElementById('modal-contact-phone').value = c.phone;
+  document.getElementById('modal-contact-active').value = c.active ? '1' : '0';
+  
+  const grps = allGroups.length ? allGroups : await api('/groups');
+  const sel = document.getElementById('modal-contact-group');
+  sel.innerHTML = '<option value="">None (Default)</option>' + grps.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  if (c.groups && c.groups.length > 0) {
+    sel.value = c.groups[0].id;
+  }
+}
+
+async function saveContactFromModal() {
+  const id = document.getElementById('contact-edit-id').value;
+  const name = document.getElementById('modal-contact-name').value.trim();
+  const phone = document.getElementById('modal-contact-phone').value.trim();
+  const active = parseInt(document.getElementById('modal-contact-active').value);
+  const groupId = document.getElementById('modal-contact-group').value;
+  
+  if (!name || !phone) return showToast('Name and phone are required', 'error');
+  
+  try {
+    if (id) {
+      await api('/contacts/' + id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, phone, active })
+      });
+      if (groupId) {
+        await api('/groups/assign', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ contactId: parseInt(id), groupId: parseInt(groupId) })
+        });
+      }
+      showToast('Contact updated', 'success');
+    } else {
+      const created = await api('/contacts', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, phone, groupId: groupId ? parseInt(groupId) : undefined })
+      });
+      showToast('Contact added', 'success');
+    }
+    hideContactModal();
+    loadContacts(contactsPage);
+  } catch(e) {
+    showToast('Failed to save contact: ' + e.message, 'error');
+  }
+}
+
+async function delContact(id) {
+  if (!confirm('Are you sure you want to delete this contact? Past send logs will be preserved.')) return;
+  try {
+    await api('/contacts/' + id, { method: 'DELETE' });
+    showToast('Contact deleted');
+    loadContacts(contactsPage);
+  } catch(e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+function exportContactsCSV() {
+  window.location.href = '/api/contacts/export';
+}
+
+// ── Bulk Import ──
+function openBulkImportModal() {
+  document.getElementById('bulk-import-modal').classList.remove('hidden');
+  document.getElementById('bulk-import-text').value = '';
+  document.getElementById('bulk-preview-container').classList.add('hidden');
+  document.getElementById('bulk-preview-summary').textContent = '';
+  document.getElementById('btn-commit-import').disabled = true;
+  parsedBulkContacts = [];
+}
+
+function closeBulkImportModal() {
+  document.getElementById('bulk-import-modal').classList.add('hidden');
+}
+
+function normalizePhoneLocal(raw) {
+  if (!raw) return '';
+  let digits = raw.replace(/[^0-9+]/g, '');
+  if (digits.startsWith('+')) digits = digits.slice(1);
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('03') && digits.length === 11) {
+    digits = '92' + digits.slice(1);
+  }
+  return digits;
+}
+
+function parseBulkImportPreview() {
+  const text = document.getElementById('bulk-import-text').value.trim();
+  if (!text) return showToast('Please enter or paste contacts first', 'error');
+  
+  const lines = text.split('
+');
+  parsedBulkContacts = [];
+  let validCount = 0;
+  let invalidCount = 0;
+  
+  const tbody = document.getElementById('bulk-preview-list');
+  tbody.innerHTML = '';
+  
+  lines.forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    
+    const parts = line.split(',').map(s => s.trim());
+    const name = parts[0] || '';
+    const rawPhone = parts[1] || '';
+    const notes = parts[2] || '';
+    const norm = normalizePhoneLocal(rawPhone);
+    
+    let valid = true;
+    let err = '';
+    if (!name) { valid = false; err = 'Missing name'; }
+    else if (!norm || norm.length < 10 || norm.length > 15) {
+      valid = false;
+      err = 'Invalid phone (' + (norm.length || 0) + ' digits)';
+    }
+    
+    if (valid) {
+      validCount++;
+      parsedBulkContacts.push({ name, phone: norm, notes, lineNum: idx + 1 });
+    } else {
+      invalidCount++;
+    }
+    
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td class="text-xs font-mono text-[#8696a0]">${idx + 1}</td>
+      <td class="font-medium text-white">${esc(name || '—')}</td>
+      <td class="font-mono text-xs text-[#25D366]">${norm ? '+' + esc(norm) : '—'}</td>
+      <td class="text-xs text-[#8696a0]">${esc(notes || '—')}</td>
+      <td>${valid ? '<span class="tag tag-active">Valid</span>' : `<span class="tag tag-failed">${esc(err)}</span>`}</td>
+    `;
+    tbody.appendChild(row);
+  });
+  
+  document.getElementById('bulk-preview-container').classList.remove('hidden');
+  document.getElementById('bulk-preview-summary').textContent = `Parsed: ${validCount} valid, ${invalidCount} invalid`;
+  document.getElementById('btn-commit-import').disabled = validCount === 0;
+}
+
+async function commitBulkImport() {
+  if (parsedBulkContacts.length === 0) return;
+  const btn = document.getElementById('btn-commit-import');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  
+  try {
+    const updateExisting = document.getElementById('bulk-update-existing')?.checked || false;
+    const payload = { 
+      contacts: parsedBulkContacts.map(c => ({ name: c.name, phone: c.phone, notes: c.notes })),
+      updateExisting
+    };
+    const res = await api('/contacts/bulk', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    
+    showToast(`Successfully imported ${res.imported} contacts (${res.skipped} skipped)`, 'success');
+    closeBulkImportModal();
+    loadContacts(1);
+  } catch(e) {
+    showToast('Import failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import Valid Contacts';
+  }
+}
+
+// ── Groups Management ──
+async function loadGroups() {
+  try {
+    allGroups = await api('/groups');
+    allGroupsMap = Object.fromEntries(allGroups.map(g => [g.id, g]));
+    
+    const tbody = document.getElementById('groups-list');
+    if (allGroups.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-[#8696a0]">No groups created yet. Click "+ Add Group" above.</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = allGroups.map(g => `
+      <tr>
+        <td data-label="Badge">
+          <div class="flex items-center gap-2">
+            <span class="w-4 h-4 rounded-full" style="background:${esc(g.color)}"></span>
+            <span class="font-mono text-xs text-[#8696a0]">${esc(g.color)}</span>
+          </div>
+        </td>
+        <td data-label="Name" class="font-medium text-white">${esc(g.name)}</td>
+        <td data-label="Members"><span id="group-count-${g.id}" class="tag bg-[#202c33] text-white">Loading...</span></td>
+        <td data-label="Actions">
+          <div class="flex items-center gap-2">
+            <button class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="editGroup(${g.id})">Edit</button>
+            <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="showAssignModal(${g.id}, '${esc(g.name)}')">Assign Contacts</button>
+            <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delGroup(${g.id})">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+    
+    for (const g of allGroups) {
+      api('/groups/' + g.id + '/contacts').then(ids => {
+        const el = document.getElementById('group-count-' + g.id);
+        if (el) el.textContent = `${ids.length} contacts`;
+      }).catch(() => {});
+    }
+  } catch(e) {}
+}
+
+function showAddGroupModal() {
+  document.getElementById('group-modal').classList.remove('hidden');
+  document.getElementById('group-modal-title').textContent = 'Add Group';
+  document.getElementById('group-edit-id').value = '';
+  document.getElementById('modal-group-name').value = '';
+  document.getElementById('modal-group-color').value = '#25D366';
+  document.getElementById('modal-group-color-hex').value = '#25D366';
+}
+
+function hideGroupModal() {
+  document.getElementById('group-modal').classList.add('hidden');
+}
+
+function editGroup(id) {
+  const g = allGroupsMap[id];
+  if (!g) return;
+  document.getElementById('group-modal').classList.remove('hidden');
+  document.getElementById('group-modal-title').textContent = 'Edit Group';
+  document.getElementById('group-edit-id').value = g.id;
+  document.getElementById('modal-group-name').value = g.name;
+  document.getElementById('modal-group-color').value = g.color || '#25D366';
+  document.getElementById('modal-group-color-hex').value = g.color || '#25D366';
+}
+
+async function saveGroupFromModal() {
+  const id = document.getElementById('group-edit-id').value;
+  const name = document.getElementById('modal-group-name').value.trim();
+  const color = document.getElementById('modal-group-color-hex').value.trim() || '#25D366';
+  if (!name) return showToast('Group name required', 'error');
+  
+  try {
+    if (id) {
+      await api('/groups/' + id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, color })
+      });
+      showToast('Group updated');
+    } else {
+      await api('/groups', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, color })
+      });
+      showToast('Group created');
+    }
+    hideGroupModal();
+    loadGroups();
+  } catch(e) {
+    showToast('Failed to save group: ' + e.message, 'error');
+  }
+}
+
+async function delGroup(id) {
+  if (!confirm('Delete this group? Contacts will NOT be deleted, only unlinked.')) return;
+  try {
+    await api('/groups/' + id, { method: 'DELETE' });
+    showToast('Group deleted');
+    loadGroups();
+  } catch(e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+// Sync color inputs
+document.addEventListener('input', e => {
+  if (e.target.id === 'modal-group-color') {
+    document.getElementById('modal-group-color-hex').value = e.target.value;
+  } else if (e.target.id === 'modal-group-color-hex') {
+    if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) {
+      document.getElementById('modal-group-color').value = e.target.value;
+    }
+  }
+});
+
+// Group Assign Modal
+async function showAssignModal(groupId, groupName) {
+  activeAssignGroupId = groupId;
+  document.getElementById('group-assign-modal').classList.remove('hidden');
+  document.getElementById('assign-modal-group-name').textContent = groupName;
+  document.getElementById('assign-search').value = '';
+  
+  const container = document.getElementById('assign-contacts-list');
+  container.innerHTML = '<div class="text-center py-6 text-[#8696a0]">Loading contacts...</div>';
+  
+  try {
+    const contactsRes = await api('/contacts?limit=9999');
+    const contacts = contactsRes.data || contactsRes;
+    const assignedIds = await api('/groups/' + groupId + '/contacts');
+    activeAssignAssignedSet = new Set(assignedIds);
+    
+    document.getElementById('assign-selected-count').textContent = `${activeAssignAssignedSet.size} selected`;
+    
+    container.innerHTML = contacts.map(c => `
+      <label class="flex items-center justify-between p-2.5 rounded-lg hover:bg-[#202c33] cursor-pointer transition border border-transparent hover:border-[#2a3942]">
+        <div class="flex items-center gap-3">
+          <input type="checkbox" value="${c.id}" class="assign-contact-cb w-4 h-4 accent-[#25D366]" ${activeAssignAssignedSet.has(c.id) ? 'checked' : ''} onchange="updateAssignSelectedCount()">
+          <span class="font-medium text-white">${esc(c.name)}</span>
+        </div>
+        <span class="font-mono text-xs text-[#8696a0]">+${esc(c.phone)}</span>
+      </label>
+    `).join('');
+  } catch(e) {
+    container.innerHTML = '<div class="text-center text-[#ea4335] py-4">Failed to load contacts</div>';
+  }
+}
+
+function hideAssignModal() {
+  document.getElementById('group-assign-modal').classList.add('hidden');
+}
+
+function updateAssignSelectedCount() {
+  const cbs = document.querySelectorAll('.assign-contact-cb:checked');
+  document.getElementById('assign-selected-count').textContent = `${cbs.length} selected`;
+}
+
+function filterAssignList() {
+  const q = document.getElementById('assign-search').value.toLowerCase();
+  const labels = document.querySelectorAll('#assign-contacts-list label');
+  labels.forEach(lbl => {
+    lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
+  });
+}
+
+async function saveAssignmentsFromModal() {
+  if (!activeAssignGroupId) return;
+  const cbs = document.querySelectorAll('.assign-contact-cb');
+  const nowChecked = new Set();
+  cbs.forEach(cb => {
+    if (cb.checked) nowChecked.add(parseInt(cb.value));
+  });
+  
+  const toAdd = [...nowChecked].filter(id => !activeAssignAssignedSet.has(id));
+  const toRemove = [...activeAssignAssignedSet].filter(id => !nowChecked.has(id));
+  
+  try {
+    for (const id of toAdd) {
+      await api('/groups/assign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contactId: id, groupId: activeAssignGroupId })
+      });
+    }
+    for (const id of toRemove) {
+      await api('/groups/unassign', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ contactId: id, groupId: activeAssignGroupId })
+      });
+    }
+    showToast('Group assignments saved', 'success');
+    hideAssignModal();
+    loadGroups();
+  } catch(e) {
+    showToast('Error saving assignments: ' + e.message, 'error');
+  }
+}
+
+// ── Templates Management ──
+async function loadTemplates() {
+  try {
+    allTemplates = await api('/messages');
+    const tbody = document.getElementById('templates-list');
+    if (allTemplates.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-6 text-[#8696a0]">No templates found. Click "+ Add Template" above.</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = allTemplates.map(t => {
+      const preview = t.body_template.substring(0, 100).replace(/
+/g, ' ');
+      return `
+        <tr>
+          <td data-label="Title" class="font-medium text-white">${esc(t.title)}</td>
+          <td data-label="Preview" class="text-xs text-[#8696a0] max-w-xs truncate">${esc(preview)}...</td>
+          <td data-label="Updated" class="text-xs text-[#8696a0]">${new Date(t.updated_at).toLocaleDateString()}</td>
+          <td data-label="Actions">
+            <div class="flex items-center gap-2">
+              <button class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="editTemplate(${t.id})">Edit</button>
+              <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="openTestModal(); document.getElementById('test-template-select').value='${t.id}'">Test</button>
+              <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delTemplate(${t.id})">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch(e) {}
+}
+
+async function showAddTemplateModal() {
+  document.getElementById('template-modal').classList.remove('hidden');
+  document.getElementById('template-modal-title').textContent = 'New Template';
+  document.getElementById('template-edit-id').value = '';
+  document.getElementById('modal-template-title').value = '';
+  document.getElementById('modal-template-body').value = 'Assalam-o-Alaikum {{name}},
+
+Ummeed hai aap khariyat se honge. Yeh {{month}} ki mahana aeanat ki reminder hai.
+
+JazakAllah Khair!';
+  
+  await populatePreviewPickers();
+  updateInteractivePreview();
+}
+
+function hideTemplateModal() {
+  document.getElementById('template-modal').classList.add('hidden');
+}
+
+async function populatePreviewPickers() {
+  try {
+    const contactsRes = await api('/contacts?limit=50&status=active');
+    const contacts = contactsRes.data || contactsRes;
+    const picker = document.getElementById('preview-contact-picker');
+    picker.innerHTML = '<option value="">Sample Contact (Ahmed Khan)</option>' + 
+      contacts.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  } catch(e) {}
+}
+
+async function editTemplate(id) {
+  const t = allTemplates.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('template-modal').classList.remove('hidden');
+  document.getElementById('template-modal-title').textContent = 'Edit Template';
+  document.getElementById('template-edit-id').value = t.id;
+  document.getElementById('modal-template-title').value = t.title;
+  document.getElementById('modal-template-body').value = t.body_template;
+  
+  await populatePreviewPickers();
+  updateInteractivePreview();
+}
+
+async function saveTemplateFromModal() {
+  const id = document.getElementById('template-edit-id').value;
+  const title = document.getElementById('modal-template-title').value.trim();
+  const body = document.getElementById('modal-template-body').value;
+  
+  if (!title || !body) return showToast('Title and message body are required', 'error');
+  
+  try {
+    if (id) {
+      await api('/messages/' + id, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title, body_template: body })
+      });
+      showToast('Template updated');
+    } else {
+      await api('/messages', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title, body_template: body })
+      });
+      showToast('Template created');
+    }
+    hideTemplateModal();
+    loadTemplates();
+  } catch(e) {
+    showToast('Failed to save template: ' + e.message, 'error');
+  }
+}
+
+async function delTemplate(id) {
+  if (!confirm('Are you sure you want to delete this template?')) return;
+  try {
+    await api('/messages/' + id, { method: 'DELETE' });
+    showToast('Template deleted');
+    loadTemplates();
+  } catch(e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+function wrapText(wrapper) {
+  const ta = document.getElementById('modal-template-body');
+  if (!ta) return;
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const sel = ta.value.substring(start, end);
+  ta.value = ta.value.substring(0, start) + wrapper + sel + wrapper + ta.value.substring(end);
+  ta.focus();
+  ta.setSelectionRange(start + wrapper.length, end + wrapper.length);
+  updateInteractivePreview();
+}
+
+function insertVar(varName) {
+  const ta = document.getElementById('modal-template-body');
+  if (!ta) return;
+  const start = ta.selectionStart;
+  ta.value = ta.value.substring(0, start) + varName + ta.value.substring(ta.selectionEnd);
+  ta.focus();
+  ta.setSelectionRange(start + varName.length, start + varName.length);
+  updateInteractivePreview();
+}
+
+function updateInteractivePreview() {
+  const body = document.getElementById('modal-template-body')?.value || '';
+  const lang = document.getElementById('preview-lang-picker')?.value || 'urdu';
+  const contactId = document.getElementById('preview-contact-picker')?.value;
+  
+  let sampleName = 'Ahmed Khan';
+  let samplePhone = '923001234567';
+  if (contactId && allContactsMap[contactId]) {
+    sampleName = allContactsMap[contactId].name;
+    samplePhone = allContactsMap[contactId].phone;
+  }
+  
+  const urduMonths = ['Muharram', 'Safar', 'Rabi al-Awwal', 'Rabi al-Thani', 'Jumada al-Awwal', 'Jumada al-Thani', 'Rajab', 'Shaban', 'Ramadan', 'Shawwal', 'Dhu al-Qadah', 'Dhu al-Hijjah'];
+  const engMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const mIdx = new Date().getMonth();
+  const sampleMonth = lang === 'urdu' ? 'September' : engMonths[mIdx];
+  
+  let formatted = body
+    .replace(/\{\{name\}\}/g, `*${sampleName}*`)
+    .replace(/\{\{month\}\}/g, `*${sampleMonth}*`)
+    .replace(/\{\{phone\}\}/g, samplePhone);
+    
+  formatted = esc(formatted)
+    .replace(/\*([^\*]+)\*/g, '<strong>$1</strong>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>')
+    .replace(/~([^~]+)~/g, '<del>$1</del>')
+    .replace(/
+/g, '<br>');
+    
+  const previewBox = document.getElementById('mockup-preview-body');
+  if (previewBox) {
+    previewBox.innerHTML = formatted || '<span class="text-[#8696a0] italic">Empty message</span>';
+  }
+  const timeBox = document.getElementById('mockup-time');
+  if (timeBox) {
+    timeBox.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+}
+
+// ── Schedule & Exclusions ──
+async function loadSchedule() {
+  try {
+    const s = await api('/schedule');
+    const settings = await api('/settings');
+    const templates = await api('/messages');
+    const groups = await api('/groups');
+    
+    // Populate templates dropdown
+    const tplSel = document.getElementById('sched-message');
+    tplSel.innerHTML = templates.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join('');
+    
+    // Populate groups dropdown
+    const grpSel = document.getElementById('sched-group');
+    grpSel.innerHTML = '<option value="">All Contacts (Default)</option>' + 
+      groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+      
+    if (s) {
+      document.getElementById('sched-day').value = s.day_of_month || 1;
+      document.getElementById('sched-hour').value = s.send_hour || 10;
+      document.getElementById('sched-minute').value = s.send_minute || 0;
+      document.getElementById('sched-timezone').value = s.timezone || 'Asia/Karachi';
+      if (s.message_id) tplSel.value = s.message_id;
+      if (s.group_id) grpSel.value = s.group_id;
+      document.getElementById('sched-enabled').checked = s.is_active !== 0;
+    }
+    
+    const isPaused = settings.global_paused === 'true';
+    document.getElementById('pause-toggle').checked = isPaused;
+    document.getElementById('pause-toggle-label').textContent = isPaused ? 'Monthly automated sending is PAUSED' : 'Monthly automated sending is ACTIVE';
+    
+    // Populate exclusion contact selector
+    const contactsRes = await api('/contacts?limit=9999&status=active');
+    const contacts = contactsRes.data || contactsRes;
+    const exclSel = document.getElementById('excl-contact');
+    exclSel.innerHTML = contacts.map(c => `<option value="${c.id}">${esc(c.name)} (+${esc(c.phone)})</option>`).join('');
+    
+    const now = new Date();
+    document.getElementById('excl-month').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    
+    loadExclusions();
+  } catch(e) {}
+}
+
+async function saveSchedule() {
+  try {
+    const s = await api('/schedule');
+    const id = s?.id;
+    if (!id) return;
+    
+    const day_of_month = parseInt(document.getElementById('sched-day').value);
+    const send_hour = parseInt(document.getElementById('sched-hour').value);
+    const send_minute = parseInt(document.getElementById('sched-minute').value);
+    const timezone = document.getElementById('sched-timezone').value;
+    const message_id = parseInt(document.getElementById('sched-message').value);
+    const groupIdVal = document.getElementById('sched-group').value;
+    const group_id = groupIdVal ? parseInt(groupIdVal) : null;
+    const is_active = document.getElementById('sched-enabled').checked ? 1 : 0;
+    
+    await api('/schedule/' + id, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        day_of_month, send_hour, send_minute, timezone, message_id, group_id, is_active
+      })
+    });
+    
+    showToast('Schedule settings saved', 'success');
+    loadStatus();
+  } catch(e) {
+    showToast('Failed to save schedule: ' + e.message, 'error');
+  }
+}
+
+async function loadExclusions() {
+  try {
+    const list = await api('/exclusions');
+    const tbody = document.getElementById('exclusions-list');
+    if (!list || list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-[#8696a0]">No active per-month exclusions found</td></tr>';
+      return;
+    }
+    
+    tbody.innerHTML = list.map(e => `
+      <tr>
+        <td class="font-medium text-white">${esc(e.contact_name)}</td>
+        <td class="font-mono text-xs text-[#8696a0]">+${esc(e.contact_phone)}</td>
+        <td><span class="tag tag-skipped">${esc(e.year_month)}</span></td>
+        <td>
+          <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="removeExclusion(${e.id})">Remove</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {}
+}
+
+async function addExclusion() {
+  const contactId = parseInt(document.getElementById('excl-contact').value);
+  const yearMonth = document.getElementById('excl-month').value;
+  if (!contactId || !yearMonth) return showToast('Select contact and month', 'error');
+  
+  try {
+    await api('/exclusions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ contactId, yearMonth })
+    });
+    showToast('Exclusion saved');
+    loadExclusions();
+  } catch(e) {
+    showToast('Failed to add exclusion: ' + e.message, 'error');
+  }
+}
+
+async function removeExclusion(id) {
+  try {
+    await api('/exclusions/id/' + id, { method: 'DELETE' });
+    showToast('Exclusion removed');
+    loadExclusions();
+  } catch(e) {
+    showToast('Failed to remove: ' + e.message, 'error');
+  }
+}
+
+// ── History & Retry ──
+async function loadHistory(page = 1) {
+  try {
+    historyPage = page;
+    let period = document.getElementById('history-period').value;
+    if (!period) {
+      const now = new Date();
+      period = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      document.getElementById('history-period').value = period;
+    }
+    historyPeriod = period;
+    historyStatus = document.getElementById('history-status-filter').value;
+    
+    const params = new URLSearchParams({
+      page: historyPage,
+      limit: historyLimit
+    });
+    if (historyStatus) params.append('status', historyStatus);
+    
+    const result = await api(`/history/${historyPeriod}?${params.toString()}`);
+    const logs = result.data || [];
+    
+    // Ensure contact names are mapped
+    if (Object.keys(allContactsMap).length === 0) {
+      const cRes = await api('/contacts?limit=9999');
+      (cRes.data || cRes).forEach(c => { allContactsMap[c.id] = c; });
+    }
+    
+    // Summary strip
+    const allLogsRes = await api(`/history/${historyPeriod}?page=1&limit=10000`);
+    const allPeriodLogs = allLogsRes.data || [];
+    const total = allPeriodLogs.length;
+    const sent = allPeriodLogs.filter(l => l.status === 'sent').length;
+    const failed = allPeriodLogs.filter(l => l.status === 'failed').length;
+    const skipped = allPeriodLogs.filter(l => l.status === 'skipped').length;
+    
+    document.getElementById('hist-stat-total').textContent = total;
+    document.getElementById('hist-stat-sent').textContent = sent;
+    document.getElementById('hist-stat-failed').textContent = failed;
+    document.getElementById('hist-stat-skipped').textContent = skipped;
+    
+    const retryBtn = document.getElementById('btn-retry-failed');
+    if (failed > 0) {
+      retryBtn.classList.remove('hidden');
+      retryBtn.textContent = `🔁 Retry ${failed} Failed Messages`;
+    } else {
+      retryBtn.classList.add('hidden');
+    }
+    
+    const tbody = document.getElementById('history-list');
+    if (logs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-[#8696a0]">No send records found for this period.</td></tr>';
+    } else {
+      tbody.innerHTML = logs.map(l => {
+        const contact = allContactsMap[l.contact_id];
+        const name = contact ? contact.name : `Contact #${l.contact_id}`;
+        const phone = contact ? `+${contact.phone}` : '—';
+        const dateStr = l.sent_at 
+          ? new Date(l.sent_at).toLocaleString('en-PK', { timeZone: 'Asia/Karachi', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) 
+          : '—';
+          
+        return `
+          <tr>
+            <td data-label="Contact" class="font-medium text-white">${esc(name)}</td>
+            <td data-label="Phone" class="font-mono text-xs text-[#8696a0]">${esc(phone)}</td>
+            <td data-label="Status"><span class="tag tag-${l.status}">${l.status}</span></td>
+            <td data-label="Timestamp" class="text-xs text-[#8696a0]">${dateStr}</td>
+            <td data-label="Error" class="text-xs text-[#ea4335] max-w-xs truncate">${esc(l.error || '—')}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+    
+    const pages = result.pages || 1;
+    document.getElementById('history-pagination-info').textContent = `Page ${result.page || 1} of ${pages} (${result.total || 0} entries)`;
+    document.getElementById('history-prev-btn').disabled = (result.page || 1) <= 1;
+    document.getElementById('history-next-btn').disabled = (result.page || 1) >= pages;
+  } catch(e) {}
+}
+
+function prevHistoryPage() { if (historyPage > 1) loadHistory(historyPage - 1); }
+function nextHistoryPage() { loadHistory(historyPage + 1); }
+function setHistoryPeriod(p) {
+  document.getElementById('history-period').value = p;
+  loadHistory(1);
+}
+
+async function retryFailedMessages() {
+  if (!confirm(`Retry sending all failed messages for ${historyPeriod}?`)) return;
+  try {
+    showToast('Triggering retry for failed contacts...', 'info');
+    const res = await api('/send/retry-failed', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ yearMonth: historyPeriod })
+    });
+    showToast(`Retrying ${res.count} contacts!`, 'success');
+    connectSendStream();
+    showPage('status');
+  } catch(e) {
+    showToast('Retry error: ' + e.message, 'error');
+  }
+}
+
+// ── Settings Management ──
+async function loadSettings() {
+  try {
+    const s = await api('/settings');
+    if (s.min_delay_ms) document.getElementById('set-delay-min').value = s.min_delay_ms;
+    if (s.max_delay_ms) document.getElementById('set-delay-max').value = s.max_delay_ms;
+    if (s.typing_duration_ms) document.getElementById('set-typing-ms').value = s.typing_duration_ms;
+    if (s.daily_send_limit) document.getElementById('set-daily-cap').value = s.daily_send_limit;
+    if (s.max_retries) document.getElementById('set-max-retries').value = s.max_retries;
+    if (s.catch_up_window_hours) document.getElementById('set-catchup-hours').value = s.catch_up_window_hours;
+    if (s.owner_phone) document.getElementById('set-owner-phone').value = s.owner_phone;
+  } catch(e) {}
+}
+
+async function saveSettings() {
+  const min_delay_ms = document.getElementById('set-delay-min').value;
+  const max_delay_ms = document.getElementById('set-delay-max').value;
+  const typing_duration_ms = document.getElementById('set-typing-ms').value;
+  const daily_send_limit = document.getElementById('set-daily-cap').value;
+  const max_retries = document.getElementById('set-max-retries').value;
+  const catch_up_window_hours = document.getElementById('set-catchup-hours').value;
+  const owner_phone = document.getElementById('set-owner-phone').value.trim();
+  
+  try {
+    await api('/settings', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        min_delay_ms, max_delay_ms, typing_duration_ms, daily_send_limit, max_retries, catch_up_window_hours, owner_phone
+      })
+    });
+    showToast('System settings saved', 'success');
+  } catch(e) {
+    showToast('Failed to save settings: ' + e.message, 'error');
+  }
+}
+
+function downloadBackup() {
+  window.open('/api/backup', '_blank');
+}
+
+// ── Bootstrap Initialization ──
+checkAuth().then(authed => {
+  if (authed) {
+    loadStatus();
+    statusInterval = setInterval(loadStatus, 20000);
+  }
+});
+
+// ── Phone Pairing Code ──
+async function requestPairingCodeUI() {
+  const phoneInput = document.getElementById('pair-phone-input');
+  const btn = document.getElementById('btn-request-pairing');
+  const statusEl = document.getElementById('pair-phone-status');
+  const phone = phoneInput.value.trim();
+  
+  if (!phone) {
+    showToast('Please enter your WhatsApp phone number', 'error');
+    phoneInput.focus();
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Requesting...';
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = 'Contacting WhatsApp servers...';
+  
+  try {
+    const res = await api('/session/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone })
+    });
+    
+    document.getElementById('pairing-code-box').classList.remove('hidden');
+    document.getElementById('pairing-code-text').textContent = res.code;
+    statusEl.textContent = 'Code generated! Enter this code in WhatsApp on your phone.';
+    showToast('Pairing code generated!', 'success');
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    showToast('Pairing failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Get Pairing Code';
+  }
+}
+
+function copyPairingCode() {
+  const code = document.getElementById('pairing-code-text').textContent.trim();
+  if (!code) return;
+  navigator.clipboard.writeText(code).then(() => {
+    showToast('Pairing code copied to clipboard!', 'success');
+  }).catch(() => {
+    showToast('Code: ' + code);
+  });
+}
+
+// ── Re-enable Opted Out Contact ──
+async function reEnableContact(id) {
+  if (!confirm('Re-enable this contact and remove opt-out status? They will receive future monthly messages.')) return;
+  try {
+    await api('/contacts/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opted_out: 0, active: 1 })
+    });
+    showToast('Contact re-enabled successfully', 'success');
+    loadContacts(contactsPage);
+  } catch(e) {
+    showToast('Failed to re-enable contact: ' + e.message, 'error');
+  }
+}
+
+// ── Change Master Password ──
+async function submitChangePassword() {
+  const currentPassword = document.getElementById('change-pwd-current').value;
+  const newPassword = document.getElementById('change-pwd-new').value;
+  
+  if (!currentPassword || !newPassword) {
+    return showToast('Both current and new password are required', 'error');
+  }
+  if (newPassword.length < 6) {
+    return showToast('New password must be at least 6 characters', 'error');
+  }
+  
+  try {
+    const res = await api('/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    showToast(res.message || 'Password changed successfully', 'success');
+    document.getElementById('change-pwd-current').value = '';
+    document.getElementById('change-pwd-new').value = '';
+  } catch(e) {
+    showToast('Password change failed: ' + e.message, 'error');
+  }
+}
+
+// ── System Logs & Diagnostics ──
+let rawSystemLogs = [];
+let activeLogFilter = 'all';
+let logAutoRefresh = true;
+let logRefreshTimer = null;
+
+async function loadSystemLogs() {
+  try {
+    rawSystemLogs = await api('/system/logs');
+    renderSystemLogs();
+  } catch(e) {}
+}
+
+function filterLogs(level) {
+  activeLogFilter = level;
+  ['all', 'info', 'warn', 'error'].forEach(lvl => {
+    const btn = document.getElementById('log-filter-' + lvl);
+    if (btn) {
+      if (lvl === level) {
+        btn.classList.add('active', 'font-semibold', 'bg-[#202c33]');
+      } else {
+        btn.classList.remove('active', 'font-semibold', 'bg-[#202c33]');
+      }
+    }
+  });
+  renderSystemLogs();
+}
+
+function renderSystemLogs() {
+  const container = document.getElementById('system-logs-container');
+  if (!container) return;
+  
+  const filtered = activeLogFilter === 'all' 
+    ? rawSystemLogs 
+    : rawSystemLogs.filter(l => l.level === activeLogFilter);
+    
+  document.getElementById('log-count-indicator').textContent = `${filtered.length} events showing`;
+  
+  if (filtered.length === 0) {
+    container.innerHTML = '<div class="text-[#8696a0] py-4 text-center">No logs found matching filter</div>';
+    return;
+  }
+  
+  const levelBadges = {
+    info: '<span class="text-blue-400 font-bold">[INFO]</span>',
+    warn: '<span class="text-amber-400 font-bold">[WARN]</span>',
+    error: '<span class="text-red-400 font-bold">[ERR ]</span>'
+  };
+  
+  container.innerHTML = filtered.map(l => {
+    const time = new Date(l.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const badge = levelBadges[l.level] || '<span class="text-gray-400">[LOG ]</span>';
+    return `
+      <div class="flex items-start gap-2.5 py-1 border-b border-[#222e35]/30 hover:bg-[#111b21] px-1 rounded">
+        <span class="text-[#8696a0] select-none text-[11px]">${time}</span>
+        <span class="select-none text-[11px]">${badge}</span>
+        <span class="text-white/90 break-all leading-relaxed">${esc(l.message)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleLogAutoRefresh() {
+  logAutoRefresh = !logAutoRefresh;
+  const btn = document.getElementById('btn-toggle-log-auto');
+  if (logAutoRefresh) {
+    btn.textContent = 'Auto-refresh: ON';
+    btn.className = 'btn btn-outline-green text-xs';
+    startLogAutoRefresh();
+  } else {
+    btn.textContent = 'Auto-refresh: OFF';
+    btn.className = 'btn btn-ghost text-xs text-[#8696a0]';
+    if (logRefreshTimer) clearInterval(logRefreshTimer);
+  }
+}
+
+function startLogAutoRefresh() {
+  if (logRefreshTimer) clearInterval(logRefreshTimer);
+  logRefreshTimer = setInterval(() => {
+    const logsPage = document.getElementById('page-logs');
+    if (logsPage && logsPage.classList.contains('active')) {
+      loadSystemLogs();
+    }
+  }, 4000);
+}
+startLogAutoRefresh();
+
+</script>
+</body>
+</html>
