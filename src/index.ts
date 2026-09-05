@@ -122,17 +122,8 @@ async function main() {
     }
   })
 
-  await session.connect()
-
-  // Start dashboard server
-  const { app, port } = createServer()
-  setSession(session)
-  setScheduler(scheduler)
-  app.listen(port, () => {
-    console.log(`Dashboard: http://localhost:${port}`)
-  })
-
   if (sendNow) {
+    await session.connect()
     await session.waitForConnection()
     const recipient = targetPhone
       ? session.phoneToJid(targetPhone)
@@ -150,6 +141,7 @@ async function main() {
   }
 
   if (manualRun) {
+    await session.connect()
     await session.waitForConnection()
     console.log('Running monthly send on demand...')
     const result = await scheduler.manualRun()
@@ -159,7 +151,20 @@ async function main() {
     process.exit(0)
   }
 
-  // Start scheduler after connection is ready
+  // Start dashboard server immediately
+  const { app, port } = createServer()
+  setSession(session)
+  setScheduler(scheduler)
+  app.listen(port, () => {
+    console.log(`Dashboard: http://localhost:${port}`)
+  })
+
+  // Connect WhatsApp session in background
+  session.connect().catch((err: any) => {
+    console.error('WhatsApp connection error:', err?.message || err)
+  })
+
+  // Start scheduler once connection is established
   session.waitForConnection().then(() => {
     if (session.socket) scheduler.start(session.socket)
   })
