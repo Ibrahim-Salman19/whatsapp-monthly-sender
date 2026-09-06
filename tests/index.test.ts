@@ -223,6 +223,35 @@ test('Password hashing and verification works with bcrypt', () => {
   assert.equal(bcrypt.compareSync('wrongPassword', hash), false)
 })
 
+test('Quick-start admin password setup and verification', () => {
+  setupPassword('admin123')
+  assert.equal(verifyPassword('admin123'), true)
+  assert.equal(verifyPassword('wrongPassword'), false)
+})
+
+test('Demo sandbox insertion and removal in database', () => {
+  const db = getDB()
+  const demoPhones = ['923001234567', '923219876543', '923335557788', '923451122334', '923124455667']
+  
+  const insertContact = db.prepare(`
+    INSERT INTO contacts (name, phone, notes, active, created_at)
+    VALUES (?, ?, ?, 1, datetime('now'))
+    ON CONFLICT(phone) DO UPDATE SET name = excluded.name, notes = excluded.notes, active = 1
+  `)
+
+  for (const p of demoPhones) {
+    insertContact.run('Demo Contact', p, 'Test demo')
+  }
+
+  const countBefore = (db.prepare(`SELECT COUNT(*) as count FROM contacts WHERE phone IN (${demoPhones.map(() => '?').join(',')})`).get(...demoPhones) as any).count
+  assert.equal(countBefore, 5)
+
+  // Clear demo data
+  db.prepare(`DELETE FROM contacts WHERE phone IN (${demoPhones.map(() => '?').join(',')})`).run(...demoPhones)
+  const countAfter = (db.prepare(`SELECT COUNT(*) as count FROM contacts WHERE phone IN (${demoPhones.map(() => '?').join(',')})`).get(...demoPhones) as any).count
+  assert.equal(countAfter, 0)
+})
+
 console.log(`\n========================================`)
 console.log(`TEST RESULTS: ${passed}/${total} passed (${Math.round((passed/total)*100)}%)`)
 console.log(`========================================\n`)

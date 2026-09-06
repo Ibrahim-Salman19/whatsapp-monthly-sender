@@ -24,11 +24,17 @@ A production-grade, self-hosted automation platform for scheduled and on-demand 
   - **Embedded Migrations**: Idempotent SQLite migrations embedded in TypeScript; works identically in `tsx` dev and compiled `dist/` production.
   - **Crash Resilience**: Global unhandled exception traps, SQLite WAL checkpoints, and rotating event logs (`data/logs/events.log`).
 
-- **User-Friendly Dashboard**:
+- **Extreme User-Friendliness & Effortless Setup**:
+  - **1-Click Quick Start**: No password setup friction on first launch; click "Quick Start" to immediately access the dashboard with default credentials (`admin123`).
+  - **Guided Setup Tour (Modal Wizard)**: Step-by-step 4-stage walkthrough covering architecture, live QR linking, contact importing, and template test dispatch.
+  - **1-Click Demo Sandbox**: Instant button to populate 5 realistic contacts across Clients, Members, and VIP groups with notes; 1-click clean up anytime.
+  - **1-Click Anti-Ban Safety Profiles**: Instantly switch between `Ultra-Stealth` (for new SIMs), `Balanced` (standard), and `Fast-Track` (aged business accounts) with automated delay and quota presets.
+  - **Pre-Flight Send Confirmation**: Transparent modal calculating estimated dispatch duration, random jitter pacing, and anti-ban cooldown breakdown before broadcasting.
+  - **Direct WhatsApp Chat Links (`💬`)**: Direct click-to-chat links (`wa.me`) right in the contacts list to start a 1-on-1 WhatsApp chat with any contact instantly.
   - **In-Browser Pairing**: Displays real-time QR code data URLs and on-demand 8-character Pairing Codes (`ABCD-1234`) directly on the web UI.
   - **Live Dispatch Streaming**: Server-Sent Events (SSE) with real-time percentage progress bar, batch cooldown countdown, activity log, and 1-click abort.
   - **Live Spintax Preview**: Test template variations with 3 random generated outputs in WhatsApp chat bubble mockups.
-  - **Quick Test Modal**: Send instant test messages to any phone number or saved contact without recording to monthly history.
+  - **Quick Test Modal with "Send to My Phone"**: Instant 1-click test message delivery to your personal phone number or saved contact without recording to monthly history.
   - **Contact Management & CSV Export**: Real-time search, group badge pills, active/inactive/opt-out filters, and 1-click CSV export/import with file upload.
   - **Send History Audit & Export**: Monthly delivery records, retry failed contacts with 1-click, and CSV export.
   - **System Diagnostics**: Live event logs feed with level filters (`ALL`, `INFO`, `WARN`, `ERROR`) and auto-refresh.

@@ -126,8 +126,14 @@ tailwind.config = {
     </nav>
 
     <div class="mt-auto pt-3 border-t border-[#222e35] flex flex-col gap-2">
+      <button class="btn btn-green w-full text-xs py-2 h-auto flex items-center justify-center gap-1.5 font-semibold" onclick="openWizardModal()">
+        <span>✨ Guided Setup Tour</span>
+      </button>
       <button class="btn btn-outline-green w-full text-xs py-2 h-auto flex items-center justify-center gap-1.5" onclick="openTestModal()">
         <span>✉️ Quick Test Message</span>
+      </button>
+      <button class="btn btn-ghost w-full text-xs py-1.5 h-auto flex items-center justify-center gap-1.5 text-[#8696a0] hover:text-white" onclick="loadDemoData()">
+        <span>⚡ Load Demo Data</span>
       </button>
       <div class="nav-item text-[#ea4335] hover:bg-red-950/30" onclick="logout()">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
@@ -203,7 +209,8 @@ tailwind.config = {
           <h1 class="text-2xl font-bold text-white">System Status</h1>
           <p class="text-sm text-[#8696a0]">Connection health and automation overview</p>
         </div>
-        <div class="flex gap-2.5">
+        <div class="flex flex-wrap gap-2.5">
+          <button class="btn btn-outline-green text-xs font-semibold" onclick="openWizardModal()">✨ Guided Setup Tour</button>
           <button class="btn btn-ghost text-xs" onclick="loadStatus()">↻ Refresh</button>
           <button class="btn btn-green text-xs font-semibold" onclick="confirmSendNow()">▶ Send Monthly Messages Now</button>
         </div>
@@ -734,6 +741,28 @@ tailwind.config = {
         </h3>
         <p class="text-xs text-[#8696a0] mb-4">Pacing parameters to keep your WhatsApp account safe from automated blast detection</p>
         
+        <!-- 1-Click Safety Profiles -->
+        <div class="mb-4 p-3 bg-[#0b141a] rounded-xl border border-[#222e35]">
+          <label class="text-xs text-[#8696a0] font-semibold mb-2 block">1-Click Anti-Ban Safety Profiles:</label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button type="button" class="btn btn-ghost text-left text-xs p-2.5 h-auto flex flex-col items-start border-emerald-500/40 hover:bg-emerald-950/20" onclick="applySafetyProfile('stealth')">
+              <span class="font-bold text-[#25D366] flex items-center gap-1">🛡️ Ultra-Stealth</span>
+              <span class="text-[10px] text-[#8696a0] mt-0.5">15-40s delay • 10/batch • 180s break</span>
+              <span class="text-[10px] text-emerald-400 mt-1 font-semibold">Recommended for new SIMs</span>
+            </button>
+            <button type="button" class="btn btn-ghost text-left text-xs p-2.5 h-auto flex flex-col items-start border-blue-500/40 hover:bg-blue-950/20" onclick="applySafetyProfile('balanced')">
+              <span class="font-bold text-blue-400 flex items-center gap-1">⚖️ Balanced (Standard)</span>
+              <span class="text-[10px] text-[#8696a0] mt-0.5">10-35s delay • 15/batch • 120s break</span>
+              <span class="text-[10px] text-blue-300 mt-1 font-semibold">Best for regular numbers</span>
+            </button>
+            <button type="button" class="btn btn-ghost text-left text-xs p-2.5 h-auto flex flex-col items-start border-amber-500/40 hover:bg-amber-950/20" onclick="applySafetyProfile('fast')">
+              <span class="font-bold text-amber-400 flex items-center gap-1">🚀 Fast Track</span>
+              <span class="text-[10px] text-[#8696a0] mt-0.5">8-20s delay • 25/batch • 60s break</span>
+              <span class="text-[10px] text-amber-300 mt-1 font-semibold">For aged business accounts</span>
+            </button>
+          </div>
+        </div>
+
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Min Random Delay (Seconds)</label>
@@ -829,6 +858,7 @@ tailwind.config = {
 
         <div class="flex flex-wrap gap-3">
           <button class="btn btn-ghost text-xs" onclick="downloadBackup()">💾 Download SQLite Database Backup</button>
+          <button class="btn btn-ghost text-xs text-amber-400 border-amber-400/30" onclick="clearDemoData()">🧹 Remove Demo Sandbox Contacts</button>
           <button class="btn btn-ghost text-xs" onclick="reconnectSession()">↻ Force WhatsApp Reconnect</button>
           <button class="btn btn-ghost text-xs text-[#ea4335]" onclick="relinkSession()">⚠️ Reset WhatsApp Credentials / Re-pair</button>
         </div>
@@ -896,7 +926,12 @@ tailwind.config = {
     </div>
     
     <div class="mb-3">
-      <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Target Phone Number</label>
+      <div class="flex items-center justify-between mb-1">
+        <label class="text-xs text-[#8696a0] font-semibold block">Target Phone Number</label>
+        <button type="button" class="text-xs text-[#25D366] hover:underline flex items-center gap-1" onclick="prefillMyPhone()">
+          <span>📱</span> Send to My Phone
+        </button>
+      </div>
       <input id="test-phone" placeholder="923001234567 or select contact below">
     </div>
 
@@ -1232,6 +1267,186 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- Guided Onboarding & Setup Walkthrough Modal -->
+<div id="wizard-modal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+  <div class="card w-full max-w-2xl my-auto p-6 border-[#25D366]/40 shadow-2xl flex flex-col max-h-[92vh]">
+    <!-- Wizard Header with Stepper -->
+    <div class="flex items-center justify-between pb-4 border-b border-[#222e35] mb-4">
+      <div>
+        <h3 class="font-bold text-lg text-white flex items-center gap-2">
+          <span>✨</span> WhatsApp Sender Guided Setup
+        </h3>
+        <p class="text-xs text-[#8696a0]" id="wizard-subtitle">Step 1 of 4: Welcome & Overview</p>
+      </div>
+      <button class="text-[#8696a0] hover:text-white text-2xl font-bold" onclick="closeWizardModal()">&times;</button>
+    </div>
+
+    <!-- Stepper Bar -->
+    <div class="flex items-center justify-between mb-6 px-2">
+      <div class="flex flex-col items-center flex-1 cursor-pointer" onclick="setWizardStep(1)">
+        <div id="w-dot-1" class="w-7 h-7 rounded-full bg-[#25D366] text-[#111b21] font-bold text-xs flex items-center justify-center">1</div>
+        <span class="text-[10px] text-white mt-1">Welcome</span>
+      </div>
+      <div class="h-0.5 flex-1 bg-[#222e35]" id="w-line-1"></div>
+      <div class="flex flex-col items-center flex-1 cursor-pointer" onclick="setWizardStep(2)">
+        <div id="w-dot-2" class="w-7 h-7 rounded-full bg-[#202c33] text-[#8696a0] font-bold text-xs flex items-center justify-center">2</div>
+        <span class="text-[10px] text-[#8696a0] mt-1">WhatsApp Link</span>
+      </div>
+      <div class="h-0.5 flex-1 bg-[#222e35]" id="w-line-2"></div>
+      <div class="flex flex-col items-center flex-1 cursor-pointer" onclick="setWizardStep(3)">
+        <div id="w-dot-3" class="w-7 h-7 rounded-full bg-[#202c33] text-[#8696a0] font-bold text-xs flex items-center justify-center">3</div>
+        <span class="text-[10px] text-[#8696a0] mt-1">Recipients</span>
+      </div>
+      <div class="h-0.5 flex-1 bg-[#222e35]" id="w-line-3"></div>
+      <div class="flex flex-col items-center flex-1 cursor-pointer" onclick="setWizardStep(4)">
+        <div id="w-dot-4" class="w-7 h-7 rounded-full bg-[#202c33] text-[#8696a0] font-bold text-xs flex items-center justify-center">4</div>
+        <span class="text-[10px] text-[#8696a0] mt-1">Template & Send</span>
+      </div>
+    </div>
+
+    <!-- Step 1: Welcome -->
+    <div id="wizard-step-1" class="space-y-4 flex-1 overflow-y-auto">
+      <div class="p-4 bg-gradient-to-r from-emerald-950/40 to-[#111b21] border border-emerald-500/30 rounded-xl">
+        <h4 class="font-bold text-white text-base mb-1">Automated WhatsApp Messaging Made Simple</h4>
+        <p class="text-xs text-[#8696a0] leading-relaxed">
+          Welcome! This platform lets you send scheduled monthly broadcasts or fee/invoice reminders to all your clients, students, or community members without getting banned.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="card-inner p-3">
+          <div class="text-lg mb-1">🛡️</div>
+          <div class="font-bold text-xs text-white">Residential IP Safety</div>
+          <div class="text-[11px] text-[#8696a0] mt-1">Runs from home WSL, avoiding datacenter ban triggers.</div>
+        </div>
+        <div class="card-inner p-3">
+          <div class="text-lg mb-1">🎲</div>
+          <div class="font-bold text-xs text-white">Spintax Variations</div>
+          <div class="text-[11px] text-[#8696a0] mt-1">Each message is worded uniquely so WhatsApp sees zero repetition.</div>
+        </div>
+        <div class="card-inner p-3">
+          <div class="text-lg mb-1">⏰</div>
+          <div class="font-bold text-xs text-white">Smart 24/7 Autostart</div>
+          <div class="text-[11px] text-[#8696a0] mt-1">Starts with Windows silently; catches up missed sends automatically.</div>
+        </div>
+      </div>
+
+      <div class="p-3 bg-[#202c33] rounded-lg border border-[#3b4a54]/50 flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-white">Want to explore with demo data first?</div>
+          <div class="text-[11px] text-[#8696a0]">Populates 5 sample contacts and groups so you see a populated dashboard.</div>
+        </div>
+        <button class="btn btn-ghost text-xs text-[#25D366] font-semibold border-[#25D366]/40 hover:bg-[#25D366]/10 px-3" onclick="loadDemoData(); nextWizardStep();">⚡ Load Demo Sandbox</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Link WhatsApp -->
+    <div id="wizard-step-2" class="hidden space-y-4 flex-1 overflow-y-auto">
+      <div class="text-center">
+        <h4 class="font-bold text-white text-base mb-1">Link Your WhatsApp Account</h4>
+        <p class="text-xs text-[#8696a0]">Scan the QR code below using WhatsApp on your phone.</p>
+      </div>
+
+      <div id="wizard-qr-box" class="flex justify-center my-3">
+        <div class="p-3 bg-white rounded-xl shadow-lg inline-block">
+          <img id="wizard-qr-img" class="w-48 h-48 mx-auto" alt="Scan QR Code" />
+        </div>
+      </div>
+      <div id="wizard-connected-box" class="hidden p-4 bg-emerald-950/40 border border-emerald-500/40 rounded-xl text-center">
+        <div class="text-2xl mb-1">✅</div>
+        <div class="font-bold text-white text-sm">WhatsApp Linked Successfully!</div>
+        <div class="text-xs text-[#8696a0]" id="wizard-connected-phone">Ready to send messages.</div>
+      </div>
+
+      <div class="text-xs text-[#8696a0] text-center">
+        On your phone: Open WhatsApp &gt; Settings &gt; Linked Devices &gt; Link a Device.
+      </div>
+    </div>
+
+    <!-- Step 3: Add Contacts -->
+    <div id="wizard-step-3" class="hidden space-y-4 flex-1 overflow-y-auto">
+      <div class="text-center">
+        <h4 class="font-bold text-white text-base mb-1">Add Your Broadcast Recipients</h4>
+        <p class="text-xs text-[#8696a0]">Choose how you'd like to import your contacts.</p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="card-inner p-4 text-center cursor-pointer hover:border-[#25D366]/40 transition border border-transparent" onclick="loadDemoData(); showToast('Demo contacts loaded!', 'success');">
+          <div class="text-2xl mb-2">⚡</div>
+          <div class="font-bold text-xs text-white">Load Demo Contacts</div>
+          <p class="text-[11px] text-[#8696a0] mt-1">Instant 5 contacts with groups and notes for testing.</p>
+        </div>
+        <div class="card-inner p-4 text-center cursor-pointer hover:border-[#25D366]/40 transition border border-transparent" onclick="closeWizardModal(); openBulkImportModal();">
+          <div class="text-2xl mb-2">📥</div>
+          <div class="font-bold text-xs text-white">Bulk Paste / Upload</div>
+          <p class="text-[11px] text-[#8696a0] mt-1">Paste multiple numbers or upload a CSV/Excel file.</p>
+        </div>
+        <div class="card-inner p-4 text-center cursor-pointer hover:border-[#25D366]/40 transition border border-transparent" onclick="downloadSampleCSV();">
+          <div class="text-2xl mb-2">📄</div>
+          <div class="font-bold text-xs text-white">Sample CSV Template</div>
+          <p class="text-[11px] text-[#8696a0] mt-1">Download pre-formatted Excel template.</p>
+        </div>
+      </div>
+
+      <div class="p-3 bg-[#0b141a] rounded-lg border border-[#222e35] text-center text-xs text-[#8696a0]">
+        All Pakistani formats (e.g. <span class="font-mono text-white">03001234567</span>) and international numbers with <span class="font-mono text-white">+</span> are automatically validated and normalized.
+      </div>
+    </div>
+
+    <!-- Step 4: Template & Send Test -->
+    <div id="wizard-step-4" class="hidden space-y-4 flex-1 overflow-y-auto">
+      <div class="text-center">
+        <h4 class="font-bold text-white text-base mb-1">Pick a Template & Verify</h4>
+        <p class="text-xs text-[#8696a0]">Select a pre-built template with anti-ban Spintax variations.</p>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('aeanat')">
+          <span class="font-semibold text-white">🕌 Aeanat / Donation</span>
+          <span class="text-[10px] text-[#8696a0]">Urdu monthly reminder</span>
+        </button>
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('invoice')">
+          <span class="font-semibold text-white">🧾 Business Invoice</span>
+          <span class="text-[10px] text-[#8696a0]">Billing statement</span>
+        </button>
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('fee')">
+          <span class="font-semibold text-white">🏫 Tuition / Fee</span>
+          <span class="text-[10px] text-[#8696a0]">School / academy dues</span>
+        </button>
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('rent')">
+          <span class="font-semibold text-white">🏠 Property Rent</span>
+          <span class="text-[10px] text-[#8696a0]">Monthly rent reminder</span>
+        </button>
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('gym')">
+          <span class="font-semibold text-white">🏋️ Gym / Club</span>
+          <span class="text-[10px] text-[#8696a0]">Membership renewal</span>
+        </button>
+        <button class="btn btn-ghost text-xs p-2.5 h-auto text-left flex flex-col items-start border-[#3b4a54]/40 hover:border-[#25D366]" onclick="selectWizardPreset('greeting')">
+          <span class="font-semibold text-white">✨ Client Greeting</span>
+          <span class="text-[10px] text-[#8696a0]">Monthly relationship check</span>
+        </button>
+      </div>
+
+      <div class="p-3 bg-[#0b141a] rounded-lg border border-[#222e35] text-xs text-[#8696a0]" id="wizard-template-preview">
+        Select a template above to preview...
+      </div>
+
+      <div class="flex justify-center pt-2">
+        <button class="btn btn-outline-green text-xs" onclick="closeWizardModal(); openTestModal();">🧪 Send a Free Test Message to My Phone</button>
+      </div>
+    </div>
+
+    <!-- Wizard Footer Controls -->
+    <div class="flex justify-between items-center pt-4 border-t border-[#222e35] mt-4">
+      <button class="btn btn-ghost text-xs" id="wizard-prev-btn" onclick="prevWizardStep()" disabled>Back</button>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost text-xs" onclick="closeWizardModal()">Exit Tour</button>
+        <button class="btn btn-green text-xs font-semibold px-5" id="wizard-next-btn" onclick="nextWizardStep()">Next Step →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
 <script>
@@ -1365,29 +1580,73 @@ async function checkAuth() {
   }
 }
 
+async function quickStartLocal() {
+  try {
+    const res = await fetch('/api/auth/quick-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (res.ok) location.reload();
+    else showToast('Quick start failed', 'error');
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
 function showAuthPage(firstBoot) {
   if (statusInterval) clearInterval(statusInterval);
   document.getElementById('app').innerHTML = `
     <div class="flex items-center justify-center min-h-screen w-full p-4 bg-[#0b141a]">
-      <div class="card w-full max-w-md my-auto p-8 border-[#222e35] shadow-2xl">
+      <div class="card w-full max-w-md my-auto p-8 border-[#25D366]/30 shadow-2xl">
         <div class="text-center mb-6">
-          <div class="w-12 h-12 rounded-full bg-[#25D366] text-[#111b21] font-bold text-xl flex items-center justify-center mx-auto mb-3">WA</div>
-          <h2 class="text-2xl font-bold text-white">${firstBoot ? 'Initial Admin Setup' : 'WhatsApp Sender Login'}</h2>
-          <p class="text-sm text-[#8696a0] mt-1">${firstBoot ? 'Set your secure dashboard access password.' : 'Enter your password to access the console.'}</p>
+          <div class="w-14 h-14 rounded-full bg-[#25D366] text-[#111b21] font-bold text-2xl flex items-center justify-center mx-auto mb-3 shadow-lg shadow-[#25D366]/20">WA</div>
+          <h2 class="text-2xl font-bold text-white">${firstBoot ? 'Welcome to WhatsApp Sender' : 'WhatsApp Sender Login'}</h2>
+          <p class="text-xs text-[#8696a0] mt-1.5 leading-relaxed">
+            ${firstBoot 
+              ? 'Automated monthly WhatsApp messaging platform with anti-ban protection. Get started in seconds.' 
+              : 'Enter your password to access your dashboard.'}
+          </p>
         </div>
-        <div class="mb-4">
-          <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Master Password</label>
-          <input type="password" id="auth-password" placeholder="${firstBoot ? 'Create a password (min 6 chars)' : 'Enter password'}" autofocus>
-        </div>
-        <button class="btn btn-green w-full font-semibold" onclick="${firstBoot ? 'setupPassword()' : 'login()'}">
-          ${firstBoot ? 'Configure & Continue' : 'Sign In'}
-        </button>
+
+        ${firstBoot ? `
+          <div class="space-y-3 mb-4">
+            <button class="btn btn-green w-full font-semibold py-3 flex items-center justify-center gap-2" onclick="quickStartLocal()">
+              <span>🚀 Quick Start (Local Access)</span>
+            </button>
+            <p class="text-[11px] text-center text-[#8696a0]">Sets default master password to <code class="text-[#25D366]">admin123</code> (changeable anytime in Settings)</p>
+            
+            <div class="relative flex py-2 items-center">
+              <div class="flex-grow border-t border-[#222e35]"></div>
+              <span class="flex-shrink mx-3 text-xs text-[#8696a0]">or set custom password</span>
+              <div class="flex-grow border-t border-[#222e35]"></div>
+            </div>
+
+            <div>
+              <input type="password" id="auth-password" placeholder="Create custom password (min 6 chars)">
+            </div>
+            <button class="btn btn-ghost w-full text-xs font-semibold" onclick="setupPassword()">
+              Save Custom Password &amp; Enter
+            </button>
+          </div>
+        ` : `
+          <div class="mb-4">
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Master Password</label>
+            <input type="password" id="auth-password" placeholder="Enter password" autofocus>
+          </div>
+          <button class="btn btn-green w-full font-semibold" onclick="login()">Sign In</button>
+          <div class="text-center mt-3">
+            <span class="text-[11px] text-[#8696a0]">Default password: <code class="text-[#25D366]">admin123</code></span>
+          </div>
+        `}
       </div>
     </div>
   `;
-  document.getElementById('auth-password').addEventListener('keydown', e => {
-    if (e.key === 'Enter') firstBoot ? setupPassword() : login();
-  });
+  const pwdInput = document.getElementById('auth-password');
+  if (pwdInput) {
+    pwdInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') firstBoot ? setupPassword() : login();
+    });
+  }
 }
 
 async function login() {
@@ -1550,6 +1809,7 @@ async function abortActiveSend() {
 async function loadStatus() {
   try {
     const s = await api('/status');
+    window.currentStatus = s;
     const dot = document.getElementById('status-dot');
     const sdot = document.getElementById('sidebar-dot');
     const stext = document.getElementById('status-text');
@@ -1606,6 +1866,25 @@ async function loadStatus() {
       phoneInfo.classList.remove('hidden');
     } else {
       phoneInfo.classList.add('hidden');
+    }
+
+    // Real-time Guided Wizard sync
+    if (typeof wizardCurrentStep !== 'undefined' && wizardCurrentStep === 2) {
+      const wQrBox = document.getElementById('wizard-qr-box');
+      const wConnBox = document.getElementById('wizard-connected-box');
+      const wConnPhone = document.getElementById('wizard-connected-phone');
+      const wQrImg = document.getElementById('wizard-qr-img');
+      if (s.session === 'connected') {
+        if (wQrBox) wQrBox.classList.add('hidden');
+        if (wConnBox) wConnBox.classList.remove('hidden');
+        if (wConnPhone) wConnPhone.textContent = s.phone ? `Connected as +${s.phone}` : 'Connected and online!';
+      } else {
+        if (wConnBox) wConnBox.classList.add('hidden');
+        if (wQrBox) {
+          wQrBox.classList.remove('hidden');
+          if (s.qrDataUrl && wQrImg) wQrImg.src = s.qrDataUrl;
+        }
+      }
     }
     
     // Global pause banner
@@ -1942,6 +2221,24 @@ function fillTestPhoneFromContact() {
   }
 }
 
+function prefillMyPhone() {
+  const saved = localStorage.getItem('user_my_phone') || '';
+  const current = (window.currentStatus && window.currentStatus.phone) ? window.currentStatus.phone : '';
+  const target = saved || current;
+  if (target) {
+    document.getElementById('test-phone').value = target;
+    showToast('Prefilled phone: +' + target, 'info');
+  } else {
+    const input = prompt('Enter your phone number for test messages (e.g. 923001234567):', '');
+    if (input && input.trim()) {
+      const cleaned = input.replace(/\D/g, '');
+      localStorage.setItem('user_my_phone', cleaned);
+      document.getElementById('test-phone').value = cleaned;
+      showToast('Prefilled phone: +' + cleaned, 'info');
+    }
+  }
+}
+
 async function executeTestSend() {
   const phone = document.getElementById('test-phone').value.trim();
   const templateId = document.getElementById('test-template-select').value;
@@ -1973,6 +2270,234 @@ async function executeTestSend() {
       btn.disabled = false;
       btn.textContent = 'Send Test Message';
     }
+  }
+}
+
+// ── Demo Sandbox Loader & Cleaner ──
+async function loadDemoData() {
+  try {
+    showToast('Loading demo contacts & groups...', 'info');
+    const res = await api('/demo/load', { method: 'POST' });
+    showToast(res.message || '5 Demo contacts loaded!', 'success');
+    if (typeof loadContacts === 'function') loadContacts(1);
+    if (typeof loadStatus === 'function') loadStatus();
+  } catch(e) {
+    showToast('Failed to load demo data: ' + e.message, 'error');
+  }
+}
+
+async function clearDemoData() {
+  if (!confirm('Remove demo sandbox contacts? Personal contacts will remain untouched.')) return;
+  try {
+    const res = await api('/demo/clear', { method: 'POST' });
+    showToast(res.message || 'Demo contacts removed successfully', 'success');
+    if (typeof loadContacts === 'function') loadContacts(1);
+    if (typeof loadStatus === 'function') loadStatus();
+  } catch(e) {
+    showToast('Failed to clear demo data: ' + e.message, 'error');
+  }
+}
+
+// ── Guided Onboarding Wizard ──
+let wizardCurrentStep = 1;
+const wizardPresets = {
+  aeanat: {
+    title: 'Urdu Monthly Aeanat / Donation',
+    body: 'السلام علیکم ورحمۃ اللہ وبرکاتہ محترم {name} صاحب! امید ہے آپ بخیر و عافیت ہوں گے۔ یہ ماہانہ اعانت/تعاون کی یاد دہانی ہے۔ آپ کے مخلصانہ تعاون کا بہت شکریہ۔ جزاک اللہ خیرا!'
+  },
+  invoice: {
+    title: 'Monthly Business Billing Statement',
+    body: '{greeting} {name}! This is a friendly reminder regarding your account invoice for {month}. Please feel free to reach out if you have any questions. Thank you for your continued partnership!'
+  },
+  fee: {
+    title: 'Tuition / Academy Monthly Dues',
+    body: '{greeting} Respected parents of {name}! Gentle reminder that the academy fee for the month of {month} is now due. Kindly submit before the 10th. Thank you!'
+  },
+  rent: {
+    title: 'Property / Unit Rent Reminder',
+    body: '{greeting} {name}! Hope you are having a pleasant week. This is a gentle reminder regarding the rent for {month}. Thank you for your prompt cooperation as always!'
+  },
+  gym: {
+    title: 'Fitness / Club Membership Renewal',
+    body: 'Hi {name}! Your club & fitness membership renewal is due for {month}. Keep up your incredible momentum and see you at the gym!'
+  },
+  greeting: {
+    title: 'Monthly Client Relationship Greeting',
+    body: '{greeting} {name}! The entire team wishes you and your family a blessed, healthy, and prosperous month of {month}!'
+  }
+};
+
+function openWizardModal() {
+  wizardCurrentStep = 1;
+  document.getElementById('wizard-modal').classList.remove('hidden');
+  updateWizardUI();
+}
+
+function closeWizardModal() {
+  document.getElementById('wizard-modal').classList.add('hidden');
+}
+
+function setWizardStep(step) {
+  wizardCurrentStep = step;
+  updateWizardUI();
+}
+
+function nextWizardStep() {
+  if (wizardCurrentStep < 4) {
+    wizardCurrentStep++;
+    updateWizardUI();
+  } else {
+    closeWizardModal();
+    showToast('Guided tour completed! You are all set to broadcast.', 'success');
+  }
+}
+
+function prevWizardStep() {
+  if (wizardCurrentStep > 1) {
+    wizardCurrentStep--;
+    updateWizardUI();
+  }
+}
+
+async function updateWizardUI() {
+  const subtitles = {
+    1: 'Step 1 of 4: Welcome & System Overview',
+    2: 'Step 2 of 4: Link Your WhatsApp Account',
+    3: 'Step 3 of 4: Add Broadcast Recipients',
+    4: 'Step 4 of 4: Pre-built Templates & Instant Test'
+  };
+  
+  const subEl = document.getElementById('wizard-subtitle');
+  if (subEl) subEl.textContent = subtitles[wizardCurrentStep] || '';
+
+  // Update step views and dots
+  for (let i = 1; i <= 4; i++) {
+    const stepEl = document.getElementById(`wizard-step-${i}`);
+    if (stepEl) {
+      if (i === wizardCurrentStep) stepEl.classList.remove('hidden');
+      else stepEl.classList.add('hidden');
+    }
+    
+    const dot = document.getElementById(`w-dot-${i}`);
+    if (dot) {
+      if (i < wizardCurrentStep) {
+        dot.className = 'w-7 h-7 rounded-full bg-[#25D366] text-[#111b21] font-bold text-xs flex items-center justify-center';
+        dot.innerHTML = '✓';
+      } else if (i === wizardCurrentStep) {
+        dot.className = 'w-7 h-7 rounded-full bg-[#25D366] text-[#111b21] font-bold text-xs flex items-center justify-center ring-4 ring-[#25D366]/20';
+        dot.textContent = String(i);
+      } else {
+        dot.className = 'w-7 h-7 rounded-full bg-[#202c33] text-[#8696a0] font-bold text-xs flex items-center justify-center';
+        dot.textContent = String(i);
+      }
+    }
+  }
+
+  // Update navigation buttons
+  const prevBtn = document.getElementById('wizard-prev-btn');
+  const nextBtn = document.getElementById('wizard-next-btn');
+  if (prevBtn) prevBtn.disabled = (wizardCurrentStep === 1);
+  if (nextBtn) {
+    nextBtn.textContent = (wizardCurrentStep === 4) ? 'Finish Setup ✓' : 'Next Step →';
+  }
+
+  // Step 2 QR/Connection sync
+  if (wizardCurrentStep === 2) {
+    try {
+      const s = await api('/status');
+      const qrBox = document.getElementById('wizard-qr-box');
+      const connBox = document.getElementById('wizard-connected-box');
+      const connPhone = document.getElementById('wizard-connected-phone');
+      const qrImg = document.getElementById('wizard-qr-img');
+      
+      if (s.session === 'connected') {
+        if (qrBox) qrBox.classList.add('hidden');
+        if (connBox) connBox.classList.remove('hidden');
+        if (connPhone) connPhone.textContent = s.phone ? `Connected as +${s.phone}` : 'Connected and online!';
+      } else {
+        if (connBox) connBox.classList.add('hidden');
+        if (qrBox) {
+          qrBox.classList.remove('hidden');
+          if (s.qrDataUrl && qrImg) qrImg.src = s.qrDataUrl;
+          else if (qrImg) qrImg.src = '/api/session/qr?t=' + Date.now();
+        }
+      }
+    } catch(e) {}
+  }
+}
+
+function selectWizardPreset(key) {
+  const preset = wizardPresets[key];
+  if (!preset) return;
+  
+  const preview = document.getElementById('wizard-template-preview');
+  if (preview) {
+    preview.innerHTML = `
+      <div class="font-semibold text-white mb-1.5 flex items-center justify-between">
+        <span>${esc(preset.title)}</span>
+        <button class="btn btn-green text-[11px] py-1 px-3 h-auto" onclick="applyPresetToMessages('${key}')">Save As My Template</button>
+      </div>
+      <div class="p-2.5 bg-[#111b21] rounded border border-[#222e35] text-white/90 whitespace-pre-wrap font-sans leading-relaxed text-xs">
+        ${esc(preset.body)}
+      </div>
+    `;
+  }
+}
+
+async function applyPresetToMessages(key) {
+  const preset = wizardPresets[key];
+  if (!preset) return;
+  try {
+    await api('/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: preset.title,
+        content: preset.body,
+        is_active: 1
+      })
+    });
+    showToast(`Template "${preset.title}" added to your library!`, 'success');
+  } catch(e) {
+    showToast('Failed to save template: ' + e.message, 'error');
+  }
+}
+
+// ── 1-Click Anti-Ban Safety Profiles ──
+function applySafetyProfile(profile) {
+  const minDelayEl = document.getElementById('set-delay-min');
+  const maxDelayEl = document.getElementById('set-delay-max');
+  const batchSizeEl = document.getElementById('set-batch-size');
+  const cooldownEl = document.getElementById('set-batch-cooldown');
+  const typingEl = document.getElementById('set-typing-ms');
+  const dailyCapEl = document.getElementById('set-daily-cap');
+
+  if (!minDelayEl) return;
+
+  if (profile === 'stealth') {
+    minDelayEl.value = 15;
+    maxDelayEl.value = 40;
+    batchSizeEl.value = 10;
+    cooldownEl.value = 180;
+    if (typingEl) typingEl.value = 4;
+    if (dailyCapEl) dailyCapEl.value = 60;
+    showToast('Applied Ultra-Stealth profile (15-40s delay). Click "Save All Settings" to persist.', 'success');
+  } else if (profile === 'balanced') {
+    minDelayEl.value = 10;
+    maxDelayEl.value = 35;
+    batchSizeEl.value = 15;
+    cooldownEl.value = 120;
+    if (typingEl) typingEl.value = 3;
+    if (dailyCapEl) dailyCapEl.value = 100;
+    showToast('Applied Balanced profile (10-35s delay). Click "Save All Settings" to persist.', 'success');
+  } else if (profile === 'fast') {
+    minDelayEl.value = 8;
+    maxDelayEl.value = 20;
+    batchSizeEl.value = 25;
+    cooldownEl.value = 60;
+    if (typingEl) typingEl.value = 2;
+    if (dailyCapEl) dailyCapEl.value = 200;
+    showToast('Applied Fast Track profile (8-20s delay). Click "Save All Settings" to persist.', 'info');
   }
 }
 
@@ -2043,6 +2568,7 @@ async function loadContacts(page = 1) {
           
         let statusBadge = '';
         let actionButtons = `
+          <a href="https://wa.me/${esc(c.phone)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost text-xs px-2 py-1 h-auto text-[#25D366] hover:bg-[#25D366]/20" title="Open direct WhatsApp chat">💬</a>
           <button class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="editContact(${c.id})">Edit</button>
           <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="openTestModal('${esc(c.phone)}')">Test</button>
           <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delContact(${c.id})">Delete</button>
@@ -2051,6 +2577,7 @@ async function loadContacts(page = 1) {
         if (c.opted_out) {
           statusBadge = '<span class="tag tag-failed">Opted Out (STOP)</span>';
           actionButtons = `
+            <a href="https://wa.me/${esc(c.phone)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost text-xs px-2 py-1 h-auto text-[#25D366] hover:bg-[#25D366]/20" title="Open direct WhatsApp chat">💬</a>
             <button class="btn btn-outline-green text-xs px-2.5 py-1 h-auto" onclick="reEnableContact(${c.id})">Re-enable</button>
             <button class="btn btn-ghost text-xs text-[#ea4335] px-2.5 py-1 h-auto hover:bg-[#ea4335]/20" onclick="delContact(${c.id})">Delete</button>
           `;

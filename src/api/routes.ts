@@ -718,6 +718,66 @@ export function createAPIRoutes(
     }
   })
 
+  // ── Demo Sandbox Loader & Cleaner ──
+  r.post('/demo/load', (_req, res) => {
+    try {
+      const db = getDB()
+      
+      const insertGroup = db.prepare('INSERT OR IGNORE INTO contact_groups (name, color, description) VALUES (?, ?, ?)')
+      insertGroup.run('Clients', '#25D366', 'Active monthly clients')
+      insertGroup.run('Members', '#3b82f6', 'Community or club members')
+      insertGroup.run('VIP', '#f59e0b', 'Priority contacts')
+
+      const clientGrp = db.prepare("SELECT id FROM contact_groups WHERE name = 'Clients'").get() as any
+      const vipGrp = db.prepare("SELECT id FROM contact_groups WHERE name = 'VIP'").get() as any
+      const memberGrp = db.prepare("SELECT id FROM contact_groups WHERE name = 'Members'").get() as any
+
+      const demoContacts = [
+        { name: 'Ahmed Khan', phone: '923001234567', notes: 'Invoice #101', group: clientGrp?.id },
+        { name: 'Sara Ali', phone: '923219876543', notes: 'Monthly Supporter', group: vipGrp?.id },
+        { name: 'Muhammad Usman', phone: '923335557788', notes: 'Academy Student', group: memberGrp?.id },
+        { name: 'Fatima Noor', phone: '923451122334', notes: 'Rent Unit 4B', group: clientGrp?.id },
+        { name: 'Bilal Tariq', phone: '923124455667', notes: 'Gold Member', group: memberGrp?.id },
+      ]
+
+      const insertContact = db.prepare(`
+        INSERT INTO contacts (name, phone, notes, active, created_at)
+        VALUES (?, ?, ?, 1, datetime('now'))
+        ON CONFLICT(phone) DO UPDATE SET name = excluded.name, notes = excluded.notes, active = 1
+      `)
+
+      const insertMembership = db.prepare('INSERT OR IGNORE INTO group_members (group_id, contact_id) VALUES (?, ?)')
+
+      let count = 0
+      for (const c of demoContacts) {
+        const info = insertContact.run(c.name, c.phone, c.notes)
+        const contactId = info.lastInsertRowid || (db.prepare('SELECT id FROM contacts WHERE phone = ?').get(c.phone) as any)?.id
+        if (contactId && c.group) {
+          insertMembership.run(c.group, contactId)
+        }
+        count++
+      }
+
+      logSystemEvent('info', `Loaded ${count} demo contacts and groups for test drive`)
+      res.json({ ok: true, count, message: '5 demo contacts loaded with groups!' })
+    } catch(e: any) {
+      res.status(500).json({ error: 'Failed to load demo data: ' + e.message })
+    }
+  })
+
+  r.post('/demo/clear', (_req, res) => {
+    try {
+      const db = getDB()
+      const demoPhones = ['923001234567', '923219876543', '923335557788', '923451122334', '923124455667']
+      const placeholders = demoPhones.map(() => '?').join(',')
+      db.prepare(`DELETE FROM contacts WHERE phone IN (${placeholders})`).run(...demoPhones)
+      logSystemEvent('info', 'Demo contacts removed')
+      res.json({ ok: true, message: 'Demo contacts removed successfully' })
+    } catch(e: any) {
+      res.status(500).json({ error: 'Failed to clear demo data: ' + e.message })
+    }
+  })
+
   return r
 }
 

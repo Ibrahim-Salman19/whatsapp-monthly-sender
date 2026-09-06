@@ -88,6 +88,15 @@ export function createAuthRoutes(): Router {
     res.json({ ok: true })
   })
 
+  // Quick start for instant 1-click onboarding (sets default password 'admin123' if first boot)
+  r.post('/quick-start', (req, res) => {
+    if (isFirstBoot()) {
+      setupPassword('admin123')
+    }
+    req.session = { authenticated: true } as any
+    res.json({ ok: true, message: 'Welcome! Access granted with default password admin123 (changeable in Settings).' })
+  })
+
   // Change password (authenticated)
   r.post('/change-password', (req, res) => {
     if (req.session?.authenticated !== true) {
