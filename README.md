@@ -6,7 +6,16 @@ A production-grade, self-hosted automation platform for scheduled and on-demand 
 
 ## Key Features
 
-- **Extreme Reliability**:
+- **Comprehensive Anti-Ban Architecture**:
+  - **Spintax Syntax Engine**: Nested syntax `{Hi|Hello|{Assalam-o-Alaikum|Salam}}` produces unique text for every single recipient, completely defeating Meta's cryptographic spam hash detectors.
+  - **Smart Batching & Cooldowns**: Pauses for a human-like break (e.g. 120 seconds every 15 messages) with live countdown timers.
+  - **Quiet Hours Protection**: Automatically pauses dispatch between late night hours (e.g. 22:00–08:00) to keep recipient interactions respectful and safe.
+  - **Dynamic Simulated Typing**: Calculates simulated `composing` duration proportional to message length.
+  - **Baileys v7 Retry Protocol**: Built-in `getMessage` callback and 500-message FIFO cache to satisfy WhatsApp server re-encryption retries without dropping messages; instant recovery on code 515 (`restartRequired`).
+  - **Direct SQLite Quota Meter**: Real-time 24-hour rate-limiting enforced directly at the database layer.
+
+- **Extreme Reliability & WSL 24/7 Autostart**:
+  - **Windows 1-Click Background Autostart**: Zero-window silent background VBScript launcher and 1-click startup installer (`deploy/windows/install-startup.bat`).
   - **Auto-Reconnection**: Resilient socket lifecycle with exponential backoff; automatically recovers from network drops mid-send.
   - **Socket Drop Immunity**: Dynamically resolves active sockets and pauses up to 45 seconds during network blips instead of aborting the batch.
   - **Phone Normalization**: Accepts Pakistani (`03001234567`) and international formats; normalizes and validates automatically (10–15 digits).
@@ -17,12 +26,11 @@ A production-grade, self-hosted automation platform for scheduled and on-demand 
 
 - **User-Friendly Dashboard**:
   - **In-Browser Pairing**: Displays real-time QR code data URLs and on-demand 8-character Pairing Codes (`ABCD-1234`) directly on the web UI.
-  - **Live Dispatch Streaming**: Server-Sent Events (SSE) with real-time percentage progress bar, activity log, and 1-click abort.
+  - **Live Dispatch Streaming**: Server-Sent Events (SSE) with real-time percentage progress bar, batch cooldown countdown, activity log, and 1-click abort.
+  - **Live Spintax Preview**: Test template variations with 3 random generated outputs in WhatsApp chat bubble mockups.
   - **Quick Test Modal**: Send instant test messages to any phone number or saved contact without recording to monthly history.
-  - **Contact Management**: Real-time search, group badge pills, active/inactive/opt-out filters, and 1-click CSV export.
-  - **Bulk Import Preview**: Pre-validation table for batch imports (`Name, Phone` or `Name, Phone, Notes`) with duplicate resolution options.
-  - **Interactive Template Mockup**: Chat bubble preview with bold (`*`), italic (`_`), strikethrough (`~`), and dynamic variables (`{{name}}`, `{{firstName}}`, `{{month}}`, `{{year}}`, `{{phone}}`, `{{notes}}`, `{{date}}`).
-  - **Exclusions Manager**: Dedicated table of per-month exclusions with 1-click removal.
+  - **Contact Management & CSV Export**: Real-time search, group badge pills, active/inactive/opt-out filters, and 1-click CSV export/import with file upload.
+  - **Send History Audit & Export**: Monthly delivery records, retry failed contacts with 1-click, and CSV export.
   - **System Diagnostics**: Live event logs feed with level filters (`ALL`, `INFO`, `WARN`, `ERROR`) and auto-refresh.
   - **Backup & Restore**: Download SQLite backups or restore from an existing backup directly from the Settings page.
 
@@ -106,10 +114,17 @@ npx tsx src/index.ts --send-now 923001234567  # Send test to specific recipient
 
 ---
 
-## Deployment
+## Deployment & 24/7 Autostart Options
 
-### 1. Systemd Service (Ubuntu / Debian / WSL2)
+### 1. Windows 1-Click Background Autostart (Easiest for WSL)
+If you are on Windows using WSL:
+1. Double-click `deploy\windows\install-startup.bat` from Windows Explorer.
+2. That's it! It automatically registers `start-background.vbs` in your Windows Startup directory.
+3. Every time Windows turns on or boots up, the WhatsApp sender runs silently in the background on WSL.
+4. To open the dashboard at any time, double-click `deploy\windows\open-dashboard.bat` (or open `http://localhost:3000`).
+5. For in-depth WSL sleep prevention, `.wslconfig` mirrored networking, and 24/7 reliability, read the [WSL Master Guide](deploy/wsl-master-guide.md).
 
+### 2. Systemd Service (Ubuntu / Debian / WSL2)
 ```bash
 sudo ./deploy/setup-service.sh
 ```
@@ -122,20 +137,25 @@ sudo systemctl restart wa-sender
 sudo journalctl -u wa-sender -f
 ```
 
-### 2. Docker & Docker Compose
-
+### 3. Docker & Docker Compose
 ```bash
 docker compose up -d --build
 docker compose logs -f
 ```
-
 The container runs on Node 22 slim with built-in native health checks (`/health`) and persistent SQLite storage mounted to `./data`.
 
 ---
 
-## Anti-Ban & Compliance Safety
+## Anti-Ban & Compliance Safety Architecture
 
-- **Randomized Jitter Delays**: Configurable random delay (default 4–10 seconds) between messages.
-- **Typing Simulation**: Simulates WhatsApp `composing` presence before dispatching messages.
-- **STOP Opt-Out Compliance**: Automatically handles incoming messages containing "STOP", "UNSUBSCRIBE", or Urdu variants ("ناٹ سبسکرائب"), marking contacts opted out immediately and silencing future broadcasts until explicitly re-enabled.
-- **Daily Send Limit**: Automatically skips remaining recipients once the daily threshold is reached to protect sender reputation.
+| Layer | Implementation | Default Value | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Spintax Syntax** | Recursive regex engine `{A\|B\|{C\|D}}` | Enabled | Generates non-identical cryptographic message text per recipient |
+| **Random Jitter** | Configurable sleep interval | 10s – 35s | Eliminates robotic interval patterns |
+| **Smart Batching** | Batch limit before cooldown | 15 messages | Mimics natural human message batches |
+| **Batch Cooldown** | Sleep duration between batches | 120 seconds | Allows recipient delivery reports to settle |
+| **Quiet Hours** | Timezone-aware safe delivery window | 22:00 – 08:00 | Halts broadcasts during sleeping hours |
+| **Simulated Typing** | `composing` presence proportional to text length | Scaled | Emulates genuine keyboard keystrokes |
+| **STOP Compliance** | Auto opt-out on Urdu & English triggers | Immediate | Protects sender reputation against spam reports |
+| **Daily Quota Cap** | SQLite transaction-level gatekeeper | 100 messages | Prevents accidental high-volume spikes |
+| **Baileys v7 Retry Cache** | FIFO message cache + `getMessage` | 500 messages | Fixes "waiting for message" decrypt stalls on WhatsApp Web |

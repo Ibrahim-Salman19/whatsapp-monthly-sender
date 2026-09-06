@@ -25,6 +25,7 @@ export class SessionManager extends EventEmitter {
   private _lastQR: string | null = null
   private _qrDataUrl: string | null = null
   private _pairingCode: string | null = null
+  private sentMessageCache = new Map<string, any>()
   private connectionPromise: {
     resolve: () => void
     reject: (e: Error) => void
@@ -34,13 +35,8 @@ export class SessionManager extends EventEmitter {
     super()
     this.authDir = authDir
     this.phoneNumber = phoneNumber ? normalizePhone(phoneNumber) : undefined
-    const logLevel = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug')
-    this.logger = pino({ 
-      level: logLevel,
-      ...(process.env.NODE_ENV !== 'production' && {
-        transport: { target: 'pino-pretty', options: { colorize: true } }
-      })
-    })
+    const logLevel = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'warn')
+    this.logger = pino({ level: logLevel })
   }
 
   get status(): SessionStatus {
@@ -65,12 +61,12 @@ export class SessionManager extends EventEmitter {
 
   get linkedNumber(): string | null {
     if (!this.sock?.user?.id) return null
-    return this.sock.user.id.split(':')[0] || null
+    return this.sock.user.id.split(':')[0].replace(/[^0-9]/g, '')
   }
 
-  private setStatus(status: SessionStatus) {
-    this._status = status
-    this.emit('status', status)
+  private setStatus(s: SessionStatus) {
+    this._status = s
+    this.emit('status', s)
   }
 
   async connect(): Promise<void> {
@@ -96,6 +92,12 @@ export class SessionManager extends EventEmitter {
       logger: this.logger,
       connectTimeoutMs: 60_000,
       qrTimeout: 60_000,
+      getMessage: async (key) => {
+        if (key?.id && this.sentMessageCache.has(key.id)) {
+          return this.sentMessageCache.get(key.id)
+        }
+        return { conversation: 'WhatsApp Monthly Sender' }
+      },
     })
 
     this.setStatus('connecting')
@@ -115,6 +117,14 @@ export class SessionManager extends EventEmitter {
           this._qrDataUrl = null
           this._pairingCode = null
           this.setStatus('needs_qr')
+          this.connect()
+          return
+        }
+
+        // WhatsApp protocol 515 (restart required) — reconnect immediately
+        if (statusCode === DisconnectReason.restartRequired) {
+          this.logger.info('WhatsApp protocol requested restart (515). Reconnecting immediately...')
+          this.reconnectAttempts = 0
           this.connect()
           return
         }
@@ -202,7 +212,14 @@ export class SessionManager extends EventEmitter {
       throw new Error('Not connected to WhatsApp')
     }
     try {
-      await this.sock.sendMessage(jid, { text })
+      const res = await this.sock.sendMessage(jid, { text })
+      if (res?.key?.id) {
+        this.sentMessageCache.set(res.key.id, { conversation: text })
+        if (this.sentMessageCache.size > 500) {
+          const firstKey = this.sentMessageCache.keys().next().value
+          if (firstKey) this.sentMessageCache.delete(firstKey)
+        }
+      }
       return true
     } catch {
       return false

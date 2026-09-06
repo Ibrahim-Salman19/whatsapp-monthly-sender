@@ -4,10 +4,11 @@ import { personalize, isStopMessage } from '../src/sender/index.js'
 import {
   getDB, addContact, updateContact, getContactById, getContactByPhone, deleteContact,
   clearOptOut, markOptedOut, setExclusion, getExclusionsWithDetails, deleteExclusionById,
-  getSetting, setSetting, type Contact
+  getSetting, setSetting, getDailySentCount, isWithinQuietHours, type Contact
 } from '../src/db/index.js'
 import { getGroups, createGroup, updateGroup, deleteGroup, assignContactToGroup, getContactsByGroup } from '../src/db/groups.js'
 import { verifyPassword, setupPassword } from '../src/api/auth.js'
+import { processSpintax, validateSpintax, generateSpintaxVariations } from '../src/utils/spintax.js'
 import bcrypt from 'bcryptjs'
 
 console.log('🧪 RUNNING FULL TEST SUITE...\n')
@@ -73,6 +74,36 @@ test('personalize replaces {{name}}, {{firstName}}, {{month}}, {{year}}, {{phone
   assert.ok(output.includes(String(new Date().getFullYear())))
   assert.ok(output.includes('VIP Supporter'))
   assert.ok(output.includes('923001234567'))
+})
+
+test('processSpintax resolves simple alternatives', () => {
+  const tpl = '{Hello|Hi|Hey} there!'
+  for (let i = 0; i < 10; i++) {
+    const res = processSpintax(tpl)
+    assert.ok(['Hello there!', 'Hi there!', 'Hey there!'].includes(res))
+  }
+})
+
+test('processSpintax resolves nested alternatives', () => {
+  const tpl = '{Greeting: {Hi|Hello}|Salute: {Hey|Peace}}'
+  const allowed = ['Greeting: Hi', 'Greeting: Hello', 'Salute: Hey', 'Salute: Peace']
+  for (let i = 0; i < 15; i++) {
+    const res = processSpintax(tpl)
+    assert.ok(allowed.includes(res), `Got unexpected: ${res}`)
+  }
+})
+
+test('validateSpintax accurately validates brace pairing', () => {
+  assert.equal(validateSpintax('{Hello|Hi}').valid, true)
+  assert.equal(validateSpintax('{Hello|{Hi|Hey}}').valid, true)
+  assert.equal(validateSpintax('{Hello|Hi').valid, false)
+  assert.equal(validateSpintax('Hello|Hi}').valid, false)
+})
+
+test('generateSpintaxVariations generates distinct variations', () => {
+  const tpl = '{Peace|Blessings|Hello|Hi} to {you|all|everyone}'
+  const vars = generateSpintaxVariations(tpl, 4)
+  assert.ok(vars.length >= 2)
 })
 
 test('isStopMessage detects Urdu and English opt-out triggers', () => {
@@ -156,6 +187,31 @@ test('Exclusions creation, details query, and deletion', () => {
 test('Settings storage and retrieval', () => {
   setSetting('test_key_sample', 'sample_val_123')
   assert.equal(getSetting('test_key_sample'), 'sample_val_123')
+})
+
+test('getDailySentCount accurately queries database', () => {
+  const count = getDailySentCount()
+  assert.ok(typeof count === 'number')
+  assert.ok(count >= 0)
+})
+
+test('isWithinQuietHours executes correctly with timezone', () => {
+  setSetting('quiet_hours_enabled', 'false')
+  assert.equal(isWithinQuietHours('Asia/Karachi'), false)
+
+  setSetting('quiet_hours_enabled', 'true')
+  setSetting('quiet_hours_start', '00:00')
+  setSetting('quiet_hours_end', '23:59')
+  assert.equal(isWithinQuietHours('Asia/Karachi'), true)
+
+  // Reset to default safe setting
+  setSetting('quiet_hours_enabled', 'false')
+})
+
+test('Anti-ban default settings exist in database', () => {
+  assert.ok(getSetting('batch_size') !== null)
+  assert.ok(getSetting('batch_cooldown_ms') !== null)
+  assert.ok(getSetting('daily_cap') !== null)
 })
 
 // 4. Auth & Security

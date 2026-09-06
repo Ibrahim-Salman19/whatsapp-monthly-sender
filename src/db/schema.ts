@@ -200,9 +200,14 @@ function seedDefaults(db: Database.Database) {
 
   // Seed default settings
   const defaults: Record<string, string> = {
-    'delay_min_ms': '30000',
-    'delay_max_ms': '90000',
+    'delay_min_ms': '10000',
+    'delay_max_ms': '35000',
     'daily_cap': '100',
+    'batch_size': '15',
+    'batch_cooldown_ms': '120000',
+    'quiet_hours_enabled': 'false',
+    'quiet_hours_start': '22:00',
+    'quiet_hours_end': '08:00',
     'catchup_hours': '72',
     'global_paused': 'false',
     'global_paused_until': '',

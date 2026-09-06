@@ -4,7 +4,7 @@ import {
   getMessage, getAllMessages, updateMessage, addMessage, deleteMessage,
   getActiveSchedule, updateSchedule,
   getSendLogForPeriod, getExcludedForMonth, getExclusionsWithDetails, deleteExclusionById, setExclusion, removeExclusion,
-  getSetting, setSetting,
+  getSetting, setSetting, getDailySentCount, isWithinQuietHours,
 } from '../db/index.js'
 import {
   getGroups, createGroup, updateGroup, deleteGroup,
@@ -14,6 +14,7 @@ import type { SessionManager } from '../session/manager.js'
 import type { MonthlyScheduler } from '../scheduler/index.js'
 import { sendSingleTestMessage, personalize } from '../sender/index.js'
 import { normalizePhone } from '../utils/phone.js'
+import { validateSpintax, generateSpintaxVariations } from '../utils/spintax.js'
 import { validateBody } from './validate.js'
 import {
   ContactCreateSchema,
@@ -89,6 +90,8 @@ export function createAPIRoutes(
 
   // ── Status ──
   r.get('/status', (_req, res) => {
+    const sched = getActiveSchedule()
+    const tz = sched?.timezone || 'Asia/Karachi'
     res.json({
       session: session?.status ?? 'disconnected',
       scheduler: scheduler?.status ?? 'idle',
@@ -99,6 +102,28 @@ export function createAPIRoutes(
       pairingCode: session?.pairingCode ?? null,
       globalPaused: getSetting('global_paused') === 'true',
       progress: scheduler?.currentProgress ?? null,
+      sentToday: getDailySentCount(),
+      dailyCap: parseInt(getSetting('daily_cap') || '100'),
+      batchSize: parseInt(getSetting('batch_size') || '15'),
+      batchCooldownSeconds: Math.round(parseInt(getSetting('batch_cooldown_ms') || '120000') / 1000),
+      quietHoursActive: isWithinQuietHours(tz),
+      quietHoursEnabled: getSetting('quiet_hours_enabled') === 'true',
+      quietHoursStart: getSetting('quiet_hours_start') || '22:00',
+      quietHoursEnd: getSetting('quiet_hours_end') || '08:00',
+    })
+  })
+
+  // ── Spintax Preview ──
+  r.post('/template/spin-preview', (req, res) => {
+    const template = String(req.body?.template || '')
+    const count = Math.min(10, Math.max(1, parseInt(req.body?.count) || 4))
+    const validation = validateSpintax(template)
+    const variations = generateSpintaxVariations(template, count)
+    res.json({
+      ok: true,
+      valid: validation.valid,
+      error: validation.error,
+      variations: variations.length > 0 ? variations : [template],
     })
   })
 
@@ -419,6 +444,26 @@ export function createAPIRoutes(
       limit,
       pages: Math.max(1, Math.ceil(total / limit)),
     })
+  })
+
+  r.get('/history/:periodKey/export', (req, res) => {
+    const periodKey = String(req.params.periodKey)
+    const sql = `
+      SELECT l.period_key, c.name, c.phone, l.status, l.sent_at, l.error
+      FROM send_log l
+      LEFT JOIN contacts c ON l.contact_id = c.id
+      WHERE l.period_key = ?
+      ORDER BY l.sent_at DESC
+    `
+    const rows = getDB().prepare(sql).all(periodKey) as any[]
+    let csv = 'Period,Name,Phone,Status,SentAt,Error\n'
+    const escape = (str: string) => `"${String(str || '').replace(/"/g, '""')}"`
+    for (const r of rows) {
+      csv += `${r.period_key},${escape(r.name)},${escape(r.phone)},${r.status},${escape(r.sent_at || '')},${escape(r.error || '')}\n`
+    }
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', `attachment; filename="whatsapp-logs-${periodKey}.csv"`)
+    res.send(csv)
   })
 
   // ── Exclusions ──

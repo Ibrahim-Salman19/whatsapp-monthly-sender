@@ -46,6 +46,7 @@ const ALLOWED_SETTINGS = [
   'delay_min_ms', 'delay_max_ms', 'daily_cap', 'catchup_hours',
   'min_delay_ms', 'max_delay_ms', 'daily_send_limit', 'catch_up_window_hours',
   'global_paused', 'global_paused_until', 'typing_duration_ms', 'max_retries', 'owner_phone',
+  'batch_size', 'batch_cooldown_ms', 'quiet_hours_enabled', 'quiet_hours_start', 'quiet_hours_end',
 ] as const
 
 export const SettingsUpdateSchema = z.object({

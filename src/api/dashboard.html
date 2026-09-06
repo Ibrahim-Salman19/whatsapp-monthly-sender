@@ -4,7 +4,31 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WhatsApp Monthly Sender</title>
-<script src="https://cdn.tailwindcss.com">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        wa: {
+          green: '#25D366',
+          darkgreen: '#128C7E',
+          teal: '#075E54',
+          bg: '#0b141a',
+          panel: '#111b21',
+          card: '#202c33',
+          card2: '#2a3942',
+          border: '#222e35',
+          text: '#e9edef',
+          muted: '#8696a0',
+          bubble: '#005c4b'
+        }
+      }
+    }
+  }
+}
+
 // ── Phone Pairing Code ──
 async function requestPairingCodeUI() {
   const phoneInput = document.getElementById('pair-phone-input');
@@ -183,35 +207,6 @@ function startLogAutoRefresh() {
 startLogAutoRefresh();
 
 </script>
-<script>
-tailwind.config = {
-  darkMode: 'class',
-  theme: {
-    extend: {
-      colors: {
-        wa: {
-          green: '#25D366',
-          darkgreen: '#128C7E',
-          teal: '#075E54',
-          bg: '#0b141a',
-          panel: '#111b21',
-          card: '#202c33',
-          card2: '#2a3942',
-          border: '#222e35',
-          text: '#e9edef',
-          muted: '#8696a0',
-          bubble: '#005c4b'
-        }
-      }
-    }
-  }
-}
-
-// ── Phone Pairing Code ──
-async function requestPairingCodeUI() {
-  const phoneInput = document.getElementById('pair-phone-input');
-  const btn = document.getElementById('btn-request-pairing');
-  const statusEl = document.getElementById('pair-phone-status');
   const phone = phoneInput.value.trim();
   
   if (!phone) {
@@ -632,6 +627,37 @@ startLogAutoRefresh();
         </div>
       </div>
 
+      <!-- Anti-Ban & Daily Quota Protection Card -->
+      <div class="card p-4 border-[#222e35] bg-[#111b21] mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div class="flex items-center gap-2.5">
+            <span class="text-xl">🛡️</span>
+            <div>
+              <div class="font-bold text-sm text-white flex items-center gap-2">
+                <span>Anti-Ban Protection & Daily Governor</span>
+                <span class="tag tag-sent text-[10px] py-0.5 px-2 font-mono">100% Active</span>
+              </div>
+              <div class="text-xs text-[#8696a0]">Pacing jitter, Spintax variation, batch cooldowns, and quiet hours</div>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs" id="antiban-badges-container">
+            <span id="badge-spintax" class="tag tag-sent font-mono">🎲 Spintax: Active</span>
+            <span id="badge-cooldown" class="tag tag-sent font-mono">☕ Cooldown: 120s / 15 msgs</span>
+            <span id="badge-quiethours" class="tag tag-active font-mono">🌙 Quiet Hours: Safe</span>
+          </div>
+        </div>
+        
+        <div class="bg-[#202c33] rounded-xl p-3.5 border border-[#222e35]">
+          <div class="flex justify-between items-center text-xs mb-2 font-medium">
+            <span class="text-[#8696a0]">Daily Outbound Protection: <strong class="text-white" id="stat-daily-sent">0</strong> / <span id="stat-daily-cap" class="text-[#e9edef]">100</span> sent today</span>
+            <span class="text-[#25D366] font-mono font-bold" id="stat-daily-pct">0%</span>
+          </div>
+          <div class="w-full bg-[#0b141a] rounded-full h-2.5 overflow-hidden">
+            <div id="stat-daily-bar" class="bg-[#25D366] h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
       <!-- Quick Actions Grid -->
       <div class="card">
         <h3 class="font-bold text-base mb-3">Quick Operations</h3>
@@ -899,6 +925,7 @@ startLogAutoRefresh();
           <p class="text-sm text-[#8696a0]">Audit monthly delivery logs, errors, and retry failed contacts</p>
         </div>
         <div class="flex gap-2" id="history-action-buttons">
+          <button class="btn btn-ghost text-xs" onclick="exportHistoryCSV()">📥 Export Logs (CSV)</button>
           <button class="btn btn-ghost text-xs text-[#25D366] border-[#25D366]/40 hidden" id="btn-retry-failed" onclick="retryFailedMessages()">↻ Retry Failed Messages</button>
         </div>
       </div>
@@ -992,13 +1019,46 @@ startLogAutoRefresh();
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Min Random Delay (Seconds)</label>
-            <input id="set-delay-min" type="number" min="5" max="300" placeholder="30">
-            <span class="text-[11px] text-[#8696a0]">Recommended: 30s</span>
+            <input id="set-delay-min" type="number" min="5" max="300" placeholder="10">
+            <span class="text-[11px] text-[#8696a0]">Recommended: 10–15s</span>
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Max Random Delay (Seconds)</label>
-            <input id="set-delay-max" type="number" min="10" max="600" placeholder="90">
-            <span class="text-[11px] text-[#8696a0]">Recommended: 90s</span>
+            <input id="set-delay-max" type="number" min="10" max="600" placeholder="35">
+            <span class="text-[11px] text-[#8696a0]">Recommended: 30–45s</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Batch Size (Messages per Batch)</label>
+            <input id="set-batch-size" type="number" min="5" max="100" placeholder="15">
+            <span class="text-[11px] text-[#8696a0]">Pauses after sending this many messages (Default: 15)</span>
+          </div>
+          <div>
+            <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Batch Cooldown Break (Seconds)</label>
+            <input id="set-batch-cooldown" type="number" min="10" max="600" placeholder="120">
+            <span class="text-[11px] text-[#8696a0]">Human pause between batches (Default: 120s / 2 mins)</span>
+          </div>
+        </div>
+
+        <div class="p-3 bg-[#202c33] rounded-lg mb-4 border border-[#222e35]">
+          <div class="flex items-center justify-between mb-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="set-quiet-hours-enabled" class="w-4 h-4 accent-[#25D366]">
+              <span class="text-xs font-semibold text-white">🌙 Enable Quiet Hours (Safe Sending Window)</span>
+            </label>
+            <span class="text-[11px] text-[#8696a0]">Never sends messages during late night hours</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="text-[11px] text-[#8696a0] block mb-1">Quiet Hours Start</label>
+              <input id="set-quiet-hours-start" type="time" value="22:00" class="text-xs py-1.5">
+            </div>
+            <div>
+              <label class="text-[11px] text-[#8696a0] block mb-1">Quiet Hours End</label>
+              <input id="set-quiet-hours-end" type="time" value="08:00" class="text-xs py-1.5">
+            </div>
           </div>
         </div>
 
@@ -1006,12 +1066,12 @@ startLogAutoRefresh();
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Typing Simulation (Seconds)</label>
             <input id="set-typing-ms" type="number" min="1" max="15" placeholder="3">
-            <span class="text-[11px] text-[#8696a0]">Simulates "typing..." status before sending</span>
+            <span class="text-[11px] text-[#8696a0]">Base typing presence simulation</span>
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Daily Message Cap</label>
             <input id="set-daily-cap" type="number" min="1" max="1000" placeholder="100">
-            <span class="text-[11px] text-[#8696a0]">Limits sends per 24h</span>
+            <span class="text-[11px] text-[#8696a0]">Hard cap per 24 hours</span>
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Max Retries on Failure</label>
@@ -1207,11 +1267,13 @@ startLogAutoRefresh();
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-      <div class="flex items-center gap-3">
-        <button class="btn btn-ghost text-xs" onclick="parseBulkImportPreview()">🔍 Parse & Preview</button>
-        <label class="flex items-center gap-2 cursor-pointer text-xs text-[#8696a0] hover:text-white">
+      <div class="flex items-center gap-2">
+        <input type="file" id="bulk-file-upload" accept=".csv,.tsv,.txt" class="hidden" onchange="handleBulkFileUpload(event)">
+        <button type="button" class="btn btn-ghost text-xs py-1.5 px-3 h-auto" onclick="document.getElementById('bulk-file-upload').click()">📂 Upload CSV/TXT</button>
+        <button class="btn btn-green text-xs font-semibold py-1.5 px-3 h-auto" onclick="parseBulkImportPreview()">🔍 Parse & Preview</button>
+        <label class="flex items-center gap-2 cursor-pointer text-xs text-[#8696a0] hover:text-white ml-2">
           <input type="checkbox" id="bulk-update-existing" class="w-4 h-4 accent-[#25D366]">
-          <span>Update details if phone already exists</span>
+          <span>Update if phone exists</span>
         </label>
       </div>
       <div class="text-xs text-[#8696a0]" id="bulk-preview-summary"></div>
@@ -1319,9 +1381,13 @@ startLogAutoRefresh();
         <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
           <label class="text-xs text-[#8696a0] font-semibold block">Message Body</label>
           <div class="flex flex-wrap gap-1.5">
-            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{name}}')">+ Name</button>
-            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{month}}')">+ Month</button>
-            <button type="button" class="btn btn-ghost text-xs px-2.5 py-1 h-auto" onclick="insertVar('{{phone}}')">+ Phone</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto text-[#25D366]" onclick="insertVar('{Assalam-o-Alaikum|Hello|Hi}')" title="Insert Spintax variation">+ Spintax</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{name}}')">+ Name</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{firstName}}')">+ First Name</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{month}}')">+ Month</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{year}}')">+ Year</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{phone}}')">+ Phone</button>
+            <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto" onclick="insertVar('{{notes}}')">+ Notes</button>
             <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto font-bold" onclick="wrapText('*')" title="Bold">B</button>
             <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto italic" onclick="wrapText('_')" title="Italic">I</button>
             <button type="button" class="btn btn-ghost text-xs px-2 py-1 h-auto line-through" onclick="wrapText('~')" title="Strikethrough">S</button>
@@ -1342,6 +1408,7 @@ startLogAutoRefresh();
               <option value="urdu">Urdu Month</option>
               <option value="en">English Month</option>
             </select>
+            <button type="button" class="btn btn-outline-green text-xs py-1 px-2.5 h-auto whitespace-nowrap" onclick="previewSpintaxVariations()">🎲 Spin 3 Variations</button>
           </div>
         </div>
 
@@ -1353,6 +1420,17 @@ startLogAutoRefresh();
               <span>✓✓</span>
             </div>
           </div>
+        </div>
+
+        <!-- Spintax Variations Container -->
+        <div id="spintax-variations-box" class="hidden mt-3 p-3 bg-[#0b141a] rounded-xl border border-[#25D366]/30">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-[#25D366] flex items-center gap-1.5">
+              <span>🎲</span> Generated Random Variations (Zero Identical Hashes):
+            </span>
+            <button type="button" class="text-xs text-[#8696a0] hover:text-white" onclick="previewSpintaxVariations()">↻ Re-spin</button>
+          </div>
+          <div id="spintax-variations-list" class="space-y-2"></div>
         </div>
       </div>
     </div>
@@ -1603,10 +1681,17 @@ function updateSendProgressUI(data) {
   const pct = total > 0 ? Math.round((completedCount / total) * 100) : 0;
   
   document.getElementById('live-send-bar').style.width = pct + '%';
-  document.getElementById('live-send-counts').textContent = `${completedCount} / ${total} processed (${sent} sent, ${failed} failed, ${skipped} skipped)`;
+  let countsText = `${completedCount} / ${total} processed (${sent} sent, ${failed} failed, ${skipped} skipped)`;
+  if (data.totalBatches && data.totalBatches > 1) {
+    countsText += ` • Batch ${data.currentBatch || 1}/${data.totalBatches}`;
+  }
+  document.getElementById('live-send-counts').textContent = countsText;
   document.getElementById('live-send-pct').textContent = pct + '%';
   
-  if (data.current) {
+  if (data.status === 'cooldown' && data.cooldownRemaining !== undefined) {
+    const cdMsg = `☕ Anti-Ban Cooldown: Batch break in progress (${data.cooldownRemaining}s remaining before next batch)...`;
+    document.getElementById('live-send-current').innerHTML = `<span class="text-amber-400 font-medium">${esc(cdMsg)}</span>`;
+  } else if (data.current) {
     document.getElementById('live-send-current').textContent = data.current;
     appendLiveLog(data.current);
   }
@@ -1802,6 +1887,42 @@ async function loadStatus() {
     document.getElementById('stat-month-sent').textContent = sentCount;
     document.getElementById('stat-month-total').textContent = `/ ${logs.length} sent`;
     document.getElementById('stat-last-period').textContent = period;
+
+    // Anti-Ban & Daily Quota Meter
+    const sentToday = s.sentToday || 0;
+    const dailyCap = s.dailyCap || 100;
+    const dailyPct = Math.min(100, Math.round((sentToday / Math.max(1, dailyCap)) * 100));
+    const sentEl = document.getElementById('stat-daily-sent');
+    const capEl = document.getElementById('stat-daily-cap');
+    const pctEl = document.getElementById('stat-daily-pct');
+    const barEl = document.getElementById('stat-daily-bar');
+    if (sentEl) sentEl.textContent = sentToday;
+    if (capEl) capEl.textContent = dailyCap;
+    if (pctEl) pctEl.textContent = dailyPct + '%';
+    if (barEl) {
+      barEl.style.width = dailyPct + '%';
+      if (dailyPct >= 90) barEl.className = 'bg-[#ea4335] h-2.5 rounded-full transition-all duration-500';
+      else if (dailyPct >= 70) barEl.className = 'bg-amber-500 h-2.5 rounded-full transition-all duration-500';
+      else barEl.className = 'bg-[#25D366] h-2.5 rounded-full transition-all duration-500';
+    }
+
+    const badgeCooldown = document.getElementById('badge-cooldown');
+    if (badgeCooldown) {
+      badgeCooldown.textContent = `☕ Cooldown: ${s.batchCooldownSeconds || 120}s / ${s.batchSize || 15} msgs`;
+    }
+    const badgeQuiet = document.getElementById('badge-quiethours');
+    if (badgeQuiet) {
+      if (s.quietHoursActive) {
+        badgeQuiet.className = 'tag tag-failed font-mono';
+        badgeQuiet.textContent = `🌙 Quiet Hours: Active (${s.quietHoursStart}-${s.quietHoursEnd})`;
+      } else if (s.quietHoursEnabled) {
+        badgeQuiet.className = 'tag tag-sent font-mono';
+        badgeQuiet.textContent = `🌙 Quiet Hours: Safe (${s.quietHoursStart}-${s.quietHoursEnd})`;
+      } else {
+        badgeQuiet.className = 'tag tag-skipped font-mono';
+        badgeQuiet.textContent = '🌙 Quiet Hours: Off';
+      }
+    }
   } catch(e) {
     console.error('loadStatus error:', e);
   }
@@ -2179,12 +2300,44 @@ function normalizePhoneLocal(raw) {
   return digits;
 }
 
+function handleBulkFileUpload(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('bulk-import-text').value = e.target?.result || '';
+    parseBulkImportPreview();
+    showToast(`Loaded ${file.name}`, 'success');
+  };
+  reader.readAsText(file);
+}
+
+function parseCsvLine(line) {
+  // Support tab (\t from Excel), semicolon (; from European CSVs), or comma (,)
+  const sep = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
+  const parts = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === sep && !inQuotes) {
+      parts.push(current.trim().replace(/^["']|["']$/g, ''));
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current.trim().replace(/^["']|["']$/g, ''));
+  return parts;
+}
+
 function parseBulkImportPreview() {
   const text = document.getElementById('bulk-import-text').value.trim();
   if (!text) return showToast('Please enter or paste contacts first', 'error');
   
-  const lines = text.split('
-');
+  const rawLines = text.split(/\r?\n/);
   parsedBulkContacts = [];
   let validCount = 0;
   let invalidCount = 0;
@@ -2192,11 +2345,21 @@ function parseBulkImportPreview() {
   const tbody = document.getElementById('bulk-preview-list');
   tbody.innerHTML = '';
   
-  lines.forEach((rawLine, idx) => {
-    const line = rawLine.trim();
-    if (!line) return;
+  // Header detection: if line 0 looks like header labels, skip it
+  let startIndex = 0;
+  if (rawLines.length > 0) {
+    const firstLower = rawLines[0].toLowerCase();
+    if ((firstLower.includes('name') || firstLower.includes('contact')) && 
+        (firstLower.includes('phone') || firstLower.includes('mobile') || firstLower.includes('cell') || firstLower.includes('num'))) {
+      startIndex = 1;
+    }
+  }
+  
+  for (let idx = startIndex; idx < rawLines.length; idx++) {
+    const line = rawLines[idx].trim();
+    if (!line) continue;
     
-    const parts = line.split(',').map(s => s.trim());
+    const parts = parseCsvLine(line);
     const name = parts[0] || '';
     const rawPhone = parts[1] || '';
     const notes = parts[2] || '';
@@ -2226,7 +2389,7 @@ function parseBulkImportPreview() {
       <td>${valid ? '<span class="tag tag-active">Valid</span>' : `<span class="tag tag-failed">${esc(err)}</span>`}</td>
     `;
     tbody.appendChild(row);
-  });
+  }
   
   document.getElementById('bulk-preview-container').classList.remove('hidden');
   document.getElementById('bulk-preview-summary').textContent = `Parsed: ${validCount} valid, ${invalidCount} invalid`;
@@ -2597,6 +2760,21 @@ function insertVar(varName) {
   updateInteractivePreview();
 }
 
+function spinTextClient(text) {
+  if (!text) return '';
+  const regex = /\{([^{}]+)\}/g;
+  let prev = text;
+  let iter = 0;
+  while (regex.test(prev) && iter < 20) {
+    prev = prev.replace(regex, (_, choices) => {
+      const opts = choices.split('|');
+      return opts[Math.floor(Math.random() * opts.length)];
+    });
+    iter++;
+  }
+  return prev;
+}
+
 function updateInteractivePreview() {
   const body = document.getElementById('modal-template-body')?.value || '';
   const lang = document.getElementById('preview-lang-picker')?.value || 'urdu';
@@ -2604,27 +2782,36 @@ function updateInteractivePreview() {
   
   let sampleName = 'Ahmed Khan';
   let samplePhone = '923001234567';
+  let sampleNotes = 'VIP Member';
   if (contactId && allContactsMap[contactId]) {
     sampleName = allContactsMap[contactId].name;
     samplePhone = allContactsMap[contactId].phone;
+    sampleNotes = allContactsMap[contactId].notes || '';
   }
+  const firstName = sampleName.trim().split(/\s+/)[0] || sampleName;
   
-  const urduMonths = ['Muharram', 'Safar', 'Rabi al-Awwal', 'Rabi al-Thani', 'Jumada al-Awwal', 'Jumada al-Thani', 'Rajab', 'Shaban', 'Ramadan', 'Shawwal', 'Dhu al-Qadah', 'Dhu al-Hijjah'];
   const engMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const urduMonths = ['جنوری', 'فروری', 'مارچ', 'اپریل', 'مئی', 'جون', 'جولائی', 'اگست', 'ستمبر', 'اکتوبر', 'نومبر', 'دسمبر'];
   const mIdx = new Date().getMonth();
-  const sampleMonth = lang === 'urdu' ? 'September' : engMonths[mIdx];
+  const sampleMonth = lang === 'urdu' ? urduMonths[mIdx] : engMonths[mIdx];
+  const now = new Date();
   
-  let formatted = body
-    .replace(/\{\{name\}\}/g, `*${sampleName}*`)
-    .replace(/\{\{month\}\}/g, `*${sampleMonth}*`)
-    .replace(/\{\{phone\}\}/g, samplePhone);
+  let spun = spinTextClient(body);
+  let formatted = spun
+    .replace(/\{\{name\}\}/gi, `*${sampleName}*`)
+    .replace(/\{\{firstName\}\}/gi, `*${firstName}*`)
+    .replace(/\{\{first_name\}\}/gi, `*${firstName}*`)
+    .replace(/\{\{month\}\}/gi, `*${sampleMonth}*`)
+    .replace(/\{\{year\}\}/gi, String(now.getFullYear()))
+    .replace(/\{\{phone\}\}/gi, samplePhone)
+    .replace(/\{\{notes\}\}/gi, sampleNotes)
+    .replace(/\{\{date\}\}/gi, now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }));
     
   formatted = esc(formatted)
     .replace(/\*([^\*]+)\*/g, '<strong>$1</strong>')
     .replace(/_([^_]+)_/g, '<em>$1</em>')
     .replace(/~([^~]+)~/g, '<del>$1</del>')
-    .replace(/
-/g, '<br>');
+    .replace(/\n/g, '<br>');
     
   const previewBox = document.getElementById('mockup-preview-body');
   if (previewBox) {
@@ -2633,6 +2820,65 @@ function updateInteractivePreview() {
   const timeBox = document.getElementById('mockup-time');
   if (timeBox) {
     timeBox.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+}
+
+async function previewSpintaxVariations() {
+  const body = document.getElementById('modal-template-body')?.value || '';
+  if (!body) return showToast('Template body is empty', 'error');
+
+  const container = document.getElementById('spintax-variations-box');
+  const list = document.getElementById('spintax-variations-list');
+  if (!container || !list) return;
+
+  container.classList.remove('hidden');
+  list.innerHTML = '<div class="text-xs text-[#8696a0] py-2">Generating variations...</div>';
+
+  try {
+    const res = await api('/template/spin-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: body, count: 3 })
+    });
+
+    if (!res.valid && res.error) {
+      list.innerHTML = `<div class="p-2 rounded bg-red-950/40 text-[#ea4335] text-xs font-mono">⚠️ Spintax Syntax Error: ${esc(res.error)}</div>`;
+      return;
+    }
+
+    const contactId = document.getElementById('preview-contact-picker')?.value;
+    const sampleName = (contactId && allContactsMap[contactId]) ? allContactsMap[contactId].name : 'Ahmed Khan';
+    const firstName = sampleName.trim().split(/\s+/)[0] || sampleName;
+
+    list.innerHTML = res.variations.map((v, idx) => {
+      const resolved = v
+        .replace(/\{\{name\}\}/gi, sampleName)
+        .replace(/\{\{firstName\}\}/gi, firstName)
+        .replace(/\{\{first_name\}\}/gi, firstName)
+        .replace(/\{\{month\}\}/gi, 'September')
+        .replace(/\{\{year\}\}/gi, '2026')
+        .replace(/\{\{phone\}\}/gi, '+92 300 1234567')
+        .replace(/\{\{date\}\}/gi, new Date().toLocaleDateString('en-GB'))
+        .replace(/\{\{notes\}\}/gi, 'VIP Supporter');
+
+      const formatted = esc(resolved)
+        .replace(/\*([^\*]+)\*/g, '<strong>$1</strong>')
+        .replace(/_([^_]+)_/g, '<em>$1</em>')
+        .replace(/~([^~]+)~/g, '<del>$1</del>')
+        .replace(/\n/g, '<br>');
+
+      return `
+        <div class="p-2.5 rounded-lg bg-[#202c33] border border-[#222e35] text-xs">
+          <div class="flex justify-between items-center text-[11px] text-[#8696a0] mb-1 font-mono">
+            <span>Variation #${idx + 1}</span>
+            <span>${resolved.length} chars</span>
+          </div>
+          <div class="text-white/90 leading-relaxed font-sans">${formatted}</div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="text-xs text-[#ea4335]">Failed to generate variations: ${esc(e.message)}</div>`;
   }
 }
 
@@ -2843,8 +3089,25 @@ async function loadHistory(page = 1) {
 function prevHistoryPage() { if (historyPage > 1) loadHistory(historyPage - 1); }
 function nextHistoryPage() { loadHistory(historyPage + 1); }
 function setHistoryPeriod(p) {
-  document.getElementById('history-period').value = p;
+  const now = new Date();
+  if (p === 'current') {
+    document.getElementById('history-period').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  } else if (p === 'prev') {
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    document.getElementById('history-period').value = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  } else {
+    document.getElementById('history-period').value = p;
+  }
   loadHistory(1);
+}
+
+function exportHistoryCSV() {
+  let period = document.getElementById('history-period').value;
+  if (!period) {
+    const now = new Date();
+    period = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+  window.location.href = `/api/history/${period}/export`;
 }
 
 async function retryFailedMessages() {
@@ -2868,34 +3131,55 @@ async function retryFailedMessages() {
 async function loadSettings() {
   try {
     const s = await api('/settings');
-    if (s.min_delay_ms) document.getElementById('set-delay-min').value = s.min_delay_ms;
-    if (s.max_delay_ms) document.getElementById('set-delay-max').value = s.max_delay_ms;
-    if (s.typing_duration_ms) document.getElementById('set-typing-ms').value = s.typing_duration_ms;
-    if (s.daily_send_limit) document.getElementById('set-daily-cap').value = s.daily_send_limit;
+    if (s.delay_min_ms || s.min_delay_ms) document.getElementById('set-delay-min').value = Math.round((parseInt(s.delay_min_ms || s.min_delay_ms) || 10000)/1000);
+    if (s.delay_max_ms || s.max_delay_ms) document.getElementById('set-delay-max').value = Math.round((parseInt(s.delay_max_ms || s.max_delay_ms) || 35000)/1000);
+    if (s.batch_size) document.getElementById('set-batch-size').value = s.batch_size;
+    if (s.batch_cooldown_ms) document.getElementById('set-batch-cooldown').value = Math.round((parseInt(s.batch_cooldown_ms) || 120000)/1000);
+    document.getElementById('set-quiet-hours-enabled').checked = s.quiet_hours_enabled === 'true';
+    if (s.quiet_hours_start) document.getElementById('set-quiet-hours-start').value = s.quiet_hours_start;
+    if (s.quiet_hours_end) document.getElementById('set-quiet-hours-end').value = s.quiet_hours_end;
+    if (s.typing_duration_ms) document.getElementById('set-typing-ms').value = Math.round((parseInt(s.typing_duration_ms) || 3000)/1000);
+    if (s.daily_cap || s.daily_send_limit) document.getElementById('set-daily-cap').value = s.daily_cap || s.daily_send_limit;
     if (s.max_retries) document.getElementById('set-max-retries').value = s.max_retries;
-    if (s.catch_up_window_hours) document.getElementById('set-catchup-hours').value = s.catch_up_window_hours;
+    if (s.catchup_hours || s.catch_up_window_hours) document.getElementById('set-catchup-hours').value = s.catchup_hours || s.catch_up_window_hours;
     if (s.owner_phone) document.getElementById('set-owner-phone').value = s.owner_phone;
   } catch(e) {}
 }
 
 async function saveSettings() {
-  const min_delay_ms = document.getElementById('set-delay-min').value;
-  const max_delay_ms = document.getElementById('set-delay-max').value;
-  const typing_duration_ms = document.getElementById('set-typing-ms').value;
-  const daily_send_limit = document.getElementById('set-daily-cap').value;
-  const max_retries = document.getElementById('set-max-retries').value;
-  const catch_up_window_hours = document.getElementById('set-catchup-hours').value;
+  const delaySecMin = parseInt(document.getElementById('set-delay-min').value) || 10;
+  const delaySecMax = parseInt(document.getElementById('set-delay-max').value) || 35;
+  const batch_size = String(parseInt(document.getElementById('set-batch-size').value) || 15);
+  const cooldownSec = parseInt(document.getElementById('set-batch-cooldown').value) || 120;
+  const quiet_hours_enabled = document.getElementById('set-quiet-hours-enabled').checked ? 'true' : 'false';
+  const quiet_hours_start = document.getElementById('set-quiet-hours-start').value || '22:00';
+  const quiet_hours_end = document.getElementById('set-quiet-hours-end').value || '08:00';
+  const typingSec = parseInt(document.getElementById('set-typing-ms').value) || 3;
+  const daily_cap = String(parseInt(document.getElementById('set-daily-cap').value) || 100);
+  const max_retries = String(parseInt(document.getElementById('set-max-retries').value) || 3);
+  const catchup_hours = String(parseInt(document.getElementById('set-catchup-hours').value) || 72);
   const owner_phone = document.getElementById('set-owner-phone').value.trim();
-  
+
   try {
     await api('/settings', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
-        min_delay_ms, max_delay_ms, typing_duration_ms, daily_send_limit, max_retries, catch_up_window_hours, owner_phone
+        delay_min_ms: String(delaySecMin * 1000),
+        delay_max_ms: String(delaySecMax * 1000),
+        batch_size,
+        batch_cooldown_ms: String(cooldownSec * 1000),
+        quiet_hours_enabled,
+        quiet_hours_start,
+        quiet_hours_end,
+        typing_duration_ms: String(typingSec * 1000),
+        daily_cap,
+        max_retries,
+        catchup_hours,
+        owner_phone
       })
     });
-    showToast('System settings saved', 'success');
+    showToast('Anti-ban & system settings saved successfully', 'success');
   } catch(e) {
     showToast('Failed to save settings: ' + e.message, 'error');
   }

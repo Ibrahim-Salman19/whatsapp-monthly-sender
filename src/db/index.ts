@@ -330,3 +330,44 @@ export function clearOptOut(idOrPhone: number | string) {
     getDB().prepare('UPDATE contacts SET opted_out = 0, active = 1 WHERE phone = ?').run(clean)
   }
 }
+
+export function getDailySentCount(dateStr?: string): number {
+  const row = getDB()
+    .prepare("SELECT COUNT(*) as c FROM send_log WHERE date(sent_at) = COALESCE(?, date('now')) AND status = 'sent'")
+    .get(dateStr || null) as { c: number }
+  return row?.c ?? 0
+}
+
+export function isWithinQuietHours(timezone: string = 'Asia/Karachi'): boolean {
+  if (getSetting('quiet_hours_enabled') !== 'true') return false
+  const startStr = getSetting('quiet_hours_start') || '22:00'
+  const endStr = getSetting('quiet_hours_end') || '08:00'
+
+  const [startH, startM] = (startStr || '22:00').split(':').map(Number)
+  const [endH, endM] = (endStr || '08:00').split(':').map(Number)
+
+  const now = new Date()
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    })
+    const parts = formatter.formatToParts(now)
+    const curH = Number(parts.find(p => p.type === 'hour')?.value ?? now.getHours())
+    const curM = Number(parts.find(p => p.type === 'minute')?.value ?? now.getMinutes())
+    const curMinutes = curH * 60 + curM
+    const startMinutes = (startH || 0) * 60 + (startM || 0)
+    const endMinutes = (endH || 0) * 60 + (endM || 0)
+
+    if (startMinutes > endMinutes) {
+      return curMinutes >= startMinutes || curMinutes < endMinutes
+    } else {
+      return curMinutes >= startMinutes && curMinutes < endMinutes
+    }
+  } catch {
+    return false
+  }
+}
+

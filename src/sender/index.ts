@@ -1,6 +1,11 @@
 import { WASocket } from '@whiskeysockets/baileys'
-import { getActiveSchedule, getActiveContacts, getMessage, logSend, hasAlreadySent, getSetting, markOptedOut, isExcluded, type Contact } from '../db/index.js'
+import {
+  getActiveSchedule, getActiveContacts, getMessage, logSend, hasAlreadySent,
+  getSetting, markOptedOut, isExcluded, getDailySentCount, isWithinQuietHours,
+  type Contact
+} from '../db/index.js'
 import { normalizePhone } from '../utils/phone.js'
+import { processSpintax } from '../utils/spintax.js'
 
 const URDU_MONTHS = [
   'جنوری', 'فروری', 'مارچ', 'اپریل', 'مئی', 'جون',
@@ -27,8 +32,11 @@ export interface SendProgress {
   skipped: number
   current?: string
   currentPhone?: string
-  status: 'idle' | 'running' | 'paused' | 'aborted' | 'done' | 'error'
+  status: 'idle' | 'running' | 'cooldown' | 'paused' | 'aborted' | 'done' | 'error'
   lastError?: string
+  cooldownRemaining?: number
+  currentBatch?: number
+  totalBatches?: number
   done: boolean
   startedAt?: string
   finishedAt?: string
@@ -70,7 +78,7 @@ export function personalize(template: string, contact: Contact, month: string): 
   const notes = contact.notes || ''
   const dateStr = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
-  return template
+  const raw = template
     .replace(/\{\{name\}\}/gi, contact.name)
     .replace(/\{\{firstName\}\}/gi, firstName)
     .replace(/\{\{first_name\}\}/gi, firstName)
@@ -79,6 +87,8 @@ export function personalize(template: string, contact: Contact, month: string): 
     .replace(/\{\{phone\}\}/gi, contact.phone)
     .replace(/\{\{notes\}\}/gi, notes)
     .replace(/\{\{date\}\}/gi, dateStr)
+
+  return processSpintax(raw)
 }
 
 function randomDelay(minMs: number, maxMs: number): number {
@@ -163,11 +173,29 @@ export async function sendMonthlyMessages(
   const monthNames = schedule.timezone.startsWith('Asia') ? URDU_MONTHS : ENGLISH_MONTHS
   const month = monthNames[now.getMonth()]
 
-  const delayMin = parseInt(getSetting('delay_min_ms') || '30000')
-  const delayMax = parseInt(getSetting('delay_max_ms') || '90000')
+  // Safe sending hours / Quiet hours check
+  if (!options.targetContactIds && isWithinQuietHours(schedule.timezone)) {
+    const qStart = getSetting('quiet_hours_start') || '22:00'
+    const qEnd = getSetting('quiet_hours_end') || '08:00'
+    const msg = `Quiet hours active (${qStart} - ${qEnd}) in ${schedule.timezone}. Broadcast deferred until morning to protect account reputation.`
+    console.log(msg)
+    progress.status = 'paused'
+    progress.lastError = msg
+    progress.done = true
+    progress.finishedAt = new Date().toISOString()
+    addLog('System', '', 'skipped', msg)
+    onProgress?.(progress)
+    return progress
+  }
+
+  const delayMin = parseInt(getSetting('delay_min_ms') || '10000')
+  const delayMax = parseInt(getSetting('delay_max_ms') || '35000')
   const maxRetries = parseInt(getSetting('max_retries') || '3')
   const typingDuration = parseInt(getSetting('typing_duration_ms') || '3000')
   const dailyCap = parseInt(getSetting('daily_cap') || '100')
+  const batchSize = Math.max(1, parseInt(getSetting('batch_size') || '15'))
+  const batchCooldownMs = Math.max(0, parseInt(getSetting('batch_cooldown_ms') || '120000'))
+  const sentTodayBeforeRun = getDailySentCount()
 
   const targetGroupId = options.groupId ?? (schedule.group_id ? schedule.group_id : undefined)
   let contacts = targetGroupId ? getActiveContacts(targetGroupId) : getActiveContacts()
@@ -187,10 +215,34 @@ export async function sendMonthlyMessages(
 
   const eligible = contacts.filter((c) => !excluded.has(c.id))
   progress.total = eligible.length
+  const totalBatches = Math.ceil(eligible.length / batchSize) || 1
+  progress.totalBatches = totalBatches
   onProgress?.(progress)
 
   for (let i = 0; i < eligible.length; i++) {
     const contact = eligible[i]
+    progress.currentBatch = Math.floor(i / batchSize) + 1
+
+    // Inter-batch cooldown pause (after every batchSize contacts sent or attempted)
+    if (i > 0 && i % batchSize === 0 && !options.abortSignal?.aborted) {
+      const prevBatch = Math.floor(i / batchSize)
+      console.log(`Completed batch ${prevBatch} of ${totalBatches}. Starting cooldown break of ${Math.round(batchCooldownMs / 1000)}s...`)
+      addLog('System', '', 'sending', `Batch break: Cooling down for ${Math.round(batchCooldownMs / 1000)}s to mimic human break...`)
+      progress.status = 'cooldown'
+
+      const totalCooldownSecs = Math.round(batchCooldownMs / 1000)
+      for (let s = totalCooldownSecs; s > 0; s--) {
+        if (options.abortSignal?.aborted) break
+        progress.cooldownRemaining = s
+        onProgress?.(progress)
+        const continued = await abortableSleep(1000, options.abortSignal)
+        if (!continued) break
+      }
+      progress.cooldownRemaining = 0
+      progress.status = 'running'
+      onProgress?.(progress)
+      if (options.abortSignal?.aborted) break
+    }
 
     // Check for abort request
     if (options.abortSignal?.aborted) {
@@ -205,11 +257,11 @@ export async function sendMonthlyMessages(
       return progress
     }
 
-    // Check daily cap
-    if (progress.sent + progress.failed >= dailyCap) {
+    // Check daily cap (combining today's existing sends with this run)
+    if (sentTodayBeforeRun + progress.sent >= dailyCap) {
       progress.skipped++
       logSend(schedule.id, contact.id, periodKey, 'skipped', 'daily_cap_exceeded')
-      addLog(contact.name, contact.phone, 'skipped', 'Daily cap reached')
+      addLog(contact.name, contact.phone, 'skipped', `Daily cap of ${dailyCap} reached`)
       continue
     }
 
@@ -252,12 +304,13 @@ export async function sendMonthlyMessages(
       } catch {}
 
       try {
-        // Presence simulation (non-blocking if it fails)
+        // Presence simulation with dynamic typing time based on message length
+        const dynamicTypingMs = Math.min(Math.max(text.length * 35, typingDuration), 8000) + Math.floor(Math.random() * 800)
         try {
           await activeSock.sendPresenceUpdate('composing', jid)
         } catch {}
 
-        const continued = await abortableSleep(typingDuration, options.abortSignal)
+        const continued = await abortableSleep(dynamicTypingMs, options.abortSignal)
         if (!continued) break
 
         await activeSock.sendMessage(jid, { text })
