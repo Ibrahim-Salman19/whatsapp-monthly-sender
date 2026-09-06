@@ -28,357 +28,6 @@ tailwind.config = {
     }
   }
 }
-
-// ── Phone Pairing Code ──
-async function requestPairingCodeUI() {
-  const phoneInput = document.getElementById('pair-phone-input');
-  const btn = document.getElementById('btn-request-pairing');
-  const statusEl = document.getElementById('pair-phone-status');
-  const phone = phoneInput.value.trim();
-  
-  if (!phone) {
-    showToast('Please enter your WhatsApp phone number', 'error');
-    phoneInput.focus();
-    return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = 'Requesting...';
-  statusEl.classList.remove('hidden');
-  statusEl.textContent = 'Contacting WhatsApp servers...';
-  
-  try {
-    const res = await api('/session/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone })
-    });
-    
-    document.getElementById('pairing-code-box').classList.remove('hidden');
-    document.getElementById('pairing-code-text').textContent = res.code;
-    statusEl.textContent = 'Code generated! Enter this code in WhatsApp on your phone.';
-    showToast('Pairing code generated!', 'success');
-  } catch (e) {
-    statusEl.textContent = 'Error: ' + e.message;
-    showToast('Pairing failed: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Get Pairing Code';
-  }
-}
-
-function copyPairingCode() {
-  const code = document.getElementById('pairing-code-text').textContent.trim();
-  if (!code) return;
-  navigator.clipboard.writeText(code).then(() => {
-    showToast('Pairing code copied to clipboard!', 'success');
-  }).catch(() => {
-    showToast('Code: ' + code);
-  });
-}
-
-// ── Re-enable Opted Out Contact ──
-async function reEnableContact(id) {
-  if (!confirm('Re-enable this contact and remove opt-out status? They will receive future monthly messages.')) return;
-  try {
-    await api('/contacts/' + id, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opted_out: 0, active: 1 })
-    });
-    showToast('Contact re-enabled successfully', 'success');
-    loadContacts(contactsPage);
-  } catch(e) {
-    showToast('Failed to re-enable contact: ' + e.message, 'error');
-  }
-}
-
-// ── Change Master Password ──
-async function submitChangePassword() {
-  const currentPassword = document.getElementById('change-pwd-current').value;
-  const newPassword = document.getElementById('change-pwd-new').value;
-  
-  if (!currentPassword || !newPassword) {
-    return showToast('Both current and new password are required', 'error');
-  }
-  if (newPassword.length < 6) {
-    return showToast('New password must be at least 6 characters', 'error');
-  }
-  
-  try {
-    const res = await api('/auth/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword, newPassword })
-    });
-    showToast(res.message || 'Password changed successfully', 'success');
-    document.getElementById('change-pwd-current').value = '';
-    document.getElementById('change-pwd-new').value = '';
-  } catch(e) {
-    showToast('Password change failed: ' + e.message, 'error');
-  }
-}
-
-// ── System Logs & Diagnostics ──
-let rawSystemLogs = [];
-let activeLogFilter = 'all';
-let logAutoRefresh = true;
-let logRefreshTimer = null;
-
-async function loadSystemLogs() {
-  try {
-    rawSystemLogs = await api('/system/logs');
-    renderSystemLogs();
-  } catch(e) {}
-}
-
-function filterLogs(level) {
-  activeLogFilter = level;
-  ['all', 'info', 'warn', 'error'].forEach(lvl => {
-    const btn = document.getElementById('log-filter-' + lvl);
-    if (btn) {
-      if (lvl === level) {
-        btn.classList.add('active', 'font-semibold', 'bg-[#202c33]');
-      } else {
-        btn.classList.remove('active', 'font-semibold', 'bg-[#202c33]');
-      }
-    }
-  });
-  renderSystemLogs();
-}
-
-function renderSystemLogs() {
-  const container = document.getElementById('system-logs-container');
-  if (!container) return;
-  
-  const filtered = activeLogFilter === 'all' 
-    ? rawSystemLogs 
-    : rawSystemLogs.filter(l => l.level === activeLogFilter);
-    
-  document.getElementById('log-count-indicator').textContent = `${filtered.length} events showing`;
-  
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="text-[#8696a0] py-4 text-center">No logs found matching filter</div>';
-    return;
-  }
-  
-  const levelBadges = {
-    info: '<span class="text-blue-400 font-bold">[INFO]</span>',
-    warn: '<span class="text-amber-400 font-bold">[WARN]</span>',
-    error: '<span class="text-red-400 font-bold">[ERR ]</span>'
-  };
-  
-  container.innerHTML = filtered.map(l => {
-    const time = new Date(l.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const badge = levelBadges[l.level] || '<span class="text-gray-400">[LOG ]</span>';
-    return `
-      <div class="flex items-start gap-2.5 py-1 border-b border-[#222e35]/30 hover:bg-[#111b21] px-1 rounded">
-        <span class="text-[#8696a0] select-none text-[11px]">${time}</span>
-        <span class="select-none text-[11px]">${badge}</span>
-        <span class="text-white/90 break-all leading-relaxed">${esc(l.message)}</span>
-      </div>
-    `;
-  }).join('');
-}
-
-function toggleLogAutoRefresh() {
-  logAutoRefresh = !logAutoRefresh;
-  const btn = document.getElementById('btn-toggle-log-auto');
-  if (logAutoRefresh) {
-    btn.textContent = 'Auto-refresh: ON';
-    btn.className = 'btn btn-outline-green text-xs';
-    startLogAutoRefresh();
-  } else {
-    btn.textContent = 'Auto-refresh: OFF';
-    btn.className = 'btn btn-ghost text-xs text-[#8696a0]';
-    if (logRefreshTimer) clearInterval(logRefreshTimer);
-  }
-}
-
-function startLogAutoRefresh() {
-  if (logRefreshTimer) clearInterval(logRefreshTimer);
-  logRefreshTimer = setInterval(() => {
-    const logsPage = document.getElementById('page-logs');
-    if (logsPage && logsPage.classList.contains('active')) {
-      loadSystemLogs();
-    }
-  }, 4000);
-}
-startLogAutoRefresh();
-
-</script>
-  const phone = phoneInput.value.trim();
-  
-  if (!phone) {
-    showToast('Please enter your WhatsApp phone number', 'error');
-    phoneInput.focus();
-    return;
-  }
-  
-  btn.disabled = true;
-  btn.textContent = 'Requesting...';
-  statusEl.classList.remove('hidden');
-  statusEl.textContent = 'Contacting WhatsApp servers...';
-  
-  try {
-    const res = await api('/session/pair', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone })
-    });
-    
-    document.getElementById('pairing-code-box').classList.remove('hidden');
-    document.getElementById('pairing-code-text').textContent = res.code;
-    statusEl.textContent = 'Code generated! Enter this code in WhatsApp on your phone.';
-    showToast('Pairing code generated!', 'success');
-  } catch (e) {
-    statusEl.textContent = 'Error: ' + e.message;
-    showToast('Pairing failed: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Get Pairing Code';
-  }
-}
-
-function copyPairingCode() {
-  const code = document.getElementById('pairing-code-text').textContent.trim();
-  if (!code) return;
-  navigator.clipboard.writeText(code).then(() => {
-    showToast('Pairing code copied to clipboard!', 'success');
-  }).catch(() => {
-    showToast('Code: ' + code);
-  });
-}
-
-// ── Re-enable Opted Out Contact ──
-async function reEnableContact(id) {
-  if (!confirm('Re-enable this contact and remove opt-out status? They will receive future monthly messages.')) return;
-  try {
-    await api('/contacts/' + id, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opted_out: 0, active: 1 })
-    });
-    showToast('Contact re-enabled successfully', 'success');
-    loadContacts(contactsPage);
-  } catch(e) {
-    showToast('Failed to re-enable contact: ' + e.message, 'error');
-  }
-}
-
-// ── Change Master Password ──
-async function submitChangePassword() {
-  const currentPassword = document.getElementById('change-pwd-current').value;
-  const newPassword = document.getElementById('change-pwd-new').value;
-  
-  if (!currentPassword || !newPassword) {
-    return showToast('Both current and new password are required', 'error');
-  }
-  if (newPassword.length < 6) {
-    return showToast('New password must be at least 6 characters', 'error');
-  }
-  
-  try {
-    const res = await api('/auth/change-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ currentPassword, newPassword })
-    });
-    showToast(res.message || 'Password changed successfully', 'success');
-    document.getElementById('change-pwd-current').value = '';
-    document.getElementById('change-pwd-new').value = '';
-  } catch(e) {
-    showToast('Password change failed: ' + e.message, 'error');
-  }
-}
-
-// ── System Logs & Diagnostics ──
-let rawSystemLogs = [];
-let activeLogFilter = 'all';
-let logAutoRefresh = true;
-let logRefreshTimer = null;
-
-async function loadSystemLogs() {
-  try {
-    rawSystemLogs = await api('/system/logs');
-    renderSystemLogs();
-  } catch(e) {}
-}
-
-function filterLogs(level) {
-  activeLogFilter = level;
-  ['all', 'info', 'warn', 'error'].forEach(lvl => {
-    const btn = document.getElementById('log-filter-' + lvl);
-    if (btn) {
-      if (lvl === level) {
-        btn.classList.add('active', 'font-semibold', 'bg-[#202c33]');
-      } else {
-        btn.classList.remove('active', 'font-semibold', 'bg-[#202c33]');
-      }
-    }
-  });
-  renderSystemLogs();
-}
-
-function renderSystemLogs() {
-  const container = document.getElementById('system-logs-container');
-  if (!container) return;
-  
-  const filtered = activeLogFilter === 'all' 
-    ? rawSystemLogs 
-    : rawSystemLogs.filter(l => l.level === activeLogFilter);
-    
-  document.getElementById('log-count-indicator').textContent = `${filtered.length} events showing`;
-  
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="text-[#8696a0] py-4 text-center">No logs found matching filter</div>';
-    return;
-  }
-  
-  const levelBadges = {
-    info: '<span class="text-blue-400 font-bold">[INFO]</span>',
-    warn: '<span class="text-amber-400 font-bold">[WARN]</span>',
-    error: '<span class="text-red-400 font-bold">[ERR ]</span>'
-  };
-  
-  container.innerHTML = filtered.map(l => {
-    const time = new Date(l.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const badge = levelBadges[l.level] || '<span class="text-gray-400">[LOG ]</span>';
-    return `
-      <div class="flex items-start gap-2.5 py-1 border-b border-[#222e35]/30 hover:bg-[#111b21] px-1 rounded">
-        <span class="text-[#8696a0] select-none text-[11px]">${time}</span>
-        <span class="select-none text-[11px]">${badge}</span>
-        <span class="text-white/90 break-all leading-relaxed">${esc(l.message)}</span>
-      </div>
-    `;
-  }).join('');
-}
-
-function toggleLogAutoRefresh() {
-  logAutoRefresh = !logAutoRefresh;
-  const btn = document.getElementById('btn-toggle-log-auto');
-  if (logAutoRefresh) {
-    btn.textContent = 'Auto-refresh: ON';
-    btn.className = 'btn btn-outline-green text-xs';
-    startLogAutoRefresh();
-  } else {
-    btn.textContent = 'Auto-refresh: OFF';
-    btn.className = 'btn btn-ghost text-xs text-[#8696a0]';
-    if (logRefreshTimer) clearInterval(logRefreshTimer);
-  }
-}
-
-function startLogAutoRefresh() {
-  if (logRefreshTimer) clearInterval(logRefreshTimer);
-  logRefreshTimer = setInterval(() => {
-    const logsPage = document.getElementById('page-logs');
-    if (logsPage && logsPage.classList.contains('active')) {
-      loadSystemLogs();
-    }
-  }, 4000);
-}
-startLogAutoRefresh();
-
 </script>
 <style>
   body { background: #0b141a; color: #e9edef; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
@@ -560,6 +209,65 @@ startLogAutoRefresh();
         </div>
       </div>
 
+      <!-- Interactive Quick-Start & Health Checklist -->
+      <div class="card border border-[#25D366]/20 bg-gradient-to-br from-[#111b21] to-[#16232b] mb-6 p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-bold text-base text-white flex items-center gap-2">
+              <span>⚡</span> Quick-Start & Operational Checklist
+            </h3>
+            <p class="text-xs text-[#8696a0]">Follow these 4 simple steps to ensure 100% automated monthly delivery</p>
+          </div>
+          <span id="setup-progress-badge" class="tag tag-active text-xs">Checking...</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <!-- Step 1: WhatsApp Session -->
+          <div class="card-inner p-3 cursor-pointer hover:border-[#25D366]/40 transition border border-[#222e35]" onclick="scrollToQR()">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>1.</span> WhatsApp Link
+              </span>
+              <span id="step-badge-wa" class="tag tag-inactive text-[10px]">Checking</span>
+            </div>
+            <p class="text-[11px] text-[#8696a0]" id="step-desc-wa">Link WhatsApp via QR or Pairing Code below</p>
+          </div>
+
+          <!-- Step 2: Recipients -->
+          <div class="card-inner p-3 cursor-pointer hover:border-[#25D366]/40 transition border border-[#222e35]" onclick="showPage('contacts')">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>2.</span> Add Contacts
+              </span>
+              <span id="step-badge-contacts" class="tag tag-inactive text-[10px]">0 Contacts</span>
+            </div>
+            <p class="text-[11px] text-[#8696a0]" id="step-desc-contacts">Import or add monthly recipients</p>
+          </div>
+
+          <!-- Step 3: Message Template -->
+          <div class="card-inner p-3 cursor-pointer hover:border-[#25D366]/40 transition border border-[#222e35]" onclick="showPage('templates')">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>3.</span> Message Template
+              </span>
+              <span id="step-badge-template" class="tag tag-active text-[10px]">Active</span>
+            </div>
+            <p class="text-[11px] text-[#8696a0]" id="step-desc-template">Select or write template with Spintax</p>
+          </div>
+
+          <!-- Step 4: Schedule & Send -->
+          <div class="card-inner p-3 cursor-pointer hover:border-[#25D366]/40 transition border border-[#222e35]" onclick="showPage('schedule')">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <span>4.</span> Schedule & Send
+              </span>
+              <span id="step-badge-schedule" class="tag tag-active text-[10px]">Day 1 @ 10:00</span>
+            </div>
+            <p class="text-[11px] text-[#8696a0]" id="step-desc-schedule">Automated 1st of month delivery</p>
+          </div>
+        </div>
+      </div>
+
       <!-- WhatsApp Connection Card -->
       <div class="card" id="whatsapp-card">
         <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -695,6 +403,7 @@ startLogAutoRefresh();
           <p class="text-sm text-[#8696a0]">Manage monthly recipients and target groups</p>
         </div>
         <div class="flex flex-wrap gap-2.5">
+          <button class="btn btn-ghost text-xs" onclick="downloadSampleCSV()">📥 Sample CSV</button>
           <button class="btn btn-ghost text-xs" onclick="exportContactsCSV()">📤 Export CSV</button>
           <button class="btn btn-ghost text-xs" onclick="openBulkImportModal()">📥 Bulk Import</button>
           <button class="btn btn-green text-xs font-semibold" onclick="showAddContactModal()">+ Add Contact</button>
@@ -822,15 +531,15 @@ startLogAutoRefresh();
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Day of Month (1-28)</label>
-            <input id="sched-day" type="number" min="1" max="28" value="1">
+            <input id="sched-day" type="number" min="1" max="28" value="1" oninput="updateScheduleSummary()">
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Send Hour (0-23)</label>
-            <input id="sched-hour" type="number" min="0" max="23" value="10">
+            <input id="sched-hour" type="number" min="0" max="23" value="10" oninput="updateScheduleSummary()">
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Send Minute (0-59)</label>
-            <input id="sched-minute" type="number" min="0" max="59" value="0">
+            <input id="sched-minute" type="number" min="0" max="59" value="0" oninput="updateScheduleSummary()">
           </div>
         </div>
 
@@ -847,7 +556,7 @@ startLogAutoRefresh();
           </div>
           <div>
             <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Timezone</label>
-            <select id="sched-timezone">
+            <select id="sched-timezone" onchange="updateScheduleSummary()">
               <option value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</option>
               <option value="Asia/Dubai">Asia/Dubai (GST, UTC+4)</option>
               <option value="Asia/Riyadh">Asia/Riyadh (AST, UTC+3)</option>
@@ -856,6 +565,15 @@ startLogAutoRefresh();
               <option value="UTC">UTC</option>
             </select>
           </div>
+        </div>
+
+        <!-- Real-time Human-Readable Schedule Explainer -->
+        <div class="mb-4 p-3 bg-[#0b141a] rounded-lg border border-[#222e35] flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-base">🗓️</span>
+            <span class="text-xs text-white" id="schedule-human-summary">Every month on the 1st at 10:00 AM (Asia/Karachi)</span>
+          </div>
+          <span class="text-[11px] text-[#25D366] font-mono font-medium" id="schedule-next-date">Next: Calculating...</span>
         </div>
 
         <div class="flex items-center justify-between pt-2 border-t border-[#222e35]">
@@ -1267,9 +985,11 @@ startLogAutoRefresh();
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <input type="file" id="bulk-file-upload" accept=".csv,.tsv,.txt" class="hidden" onchange="handleBulkFileUpload(event)">
         <button type="button" class="btn btn-ghost text-xs py-1.5 px-3 h-auto" onclick="document.getElementById('bulk-file-upload').click()">📂 Upload CSV/TXT</button>
+        <button type="button" class="btn btn-ghost text-xs py-1.5 px-3 h-auto" onclick="downloadSampleCSV()">📥 Download Sample CSV</button>
+        <button type="button" class="btn btn-ghost text-xs py-1.5 px-3 h-auto text-[#25D366]" onclick="loadSampleBulkData()">⚡ Load Example Data</button>
         <button class="btn btn-green text-xs font-semibold py-1.5 px-3 h-auto" onclick="parseBulkImportPreview()">🔍 Parse & Preview</button>
         <label class="flex items-center gap-2 cursor-pointer text-xs text-[#8696a0] hover:text-white ml-2">
           <input type="checkbox" id="bulk-update-existing" class="w-4 h-4 accent-[#25D366]">
@@ -1372,6 +1092,26 @@ startLogAutoRefresh();
     <input type="hidden" id="template-edit-id">
 
     <div class="overflow-y-auto flex-1 pr-1">
+      <!-- 1-Click Template Presets -->
+      <div class="mb-3 p-2.5 bg-[#202c33] rounded-lg border border-[#3b4a54]/50 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-base">✨</span>
+          <div>
+            <div class="text-xs font-semibold text-white">Load Pre-Built Template Preset</div>
+            <div class="text-[11px] text-[#8696a0]">Select a battle-tested template with anti-ban Spintax variations</div>
+          </div>
+        </div>
+        <select id="preset-template-picker" class="text-xs py-1.5 px-2.5 bg-[#111b21] border border-[#3b4a54] rounded w-auto text-white cursor-pointer" onchange="loadTemplatePreset(this.value)">
+          <option value="">-- Choose Template Preset --</option>
+          <option value="aeanat">🕌 Islamic / Aeanat Contribution</option>
+          <option value="invoice">🧾 Monthly Invoice / Payment Notice</option>
+          <option value="fee">🏫 School / Tuition / Academy Fee</option>
+          <option value="rent">🏠 Monthly Rent Reminder</option>
+          <option value="gym">🏋️ Gym / Club Membership Due</option>
+          <option value="greeting">✨ Monthly Greetings & Wellbeing Check</option>
+        </select>
+      </div>
+
       <div class="mb-3">
         <label class="text-xs text-[#8696a0] font-semibold mb-1 block">Template Title</label>
         <input id="modal-template-title" placeholder="e.g. Monthly Aeanat Reminder">
@@ -1445,27 +1185,49 @@ startLogAutoRefresh();
 <!-- Confirm Send Now Modal -->
 <div id="send-now-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
   <div class="card w-full max-w-md my-auto border-[#25D366]/40">
-    <h3 class="font-bold text-lg text-white mb-2">Confirm Monthly Send</h3>
-    <p class="text-sm text-[#8696a0] mb-4">You are about to trigger the monthly message dispatch. Messages will be sent with human-paced anti-ban delays.</p>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-bold text-lg text-white flex items-center gap-2">
+        <span>🚀</span> Confirm Monthly Dispatch
+      </h3>
+      <button class="text-[#8696a0] hover:text-white text-xl" onclick="closeSendNowModal()">&times;</button>
+    </div>
+    <p class="text-xs text-[#8696a0] mb-4">You are about to start sending monthly messages. Anti-ban batching and random delay intervals will be respected.</p>
 
-    <div class="card-inner mb-4 space-y-2 text-sm">
-      <div class="flex justify-between">
+    <div class="card-inner mb-4 space-y-2.5 text-xs">
+      <div class="flex justify-between items-center">
+        <span class="text-[#8696a0]">WhatsApp Session:</span>
+        <span class="font-medium" id="confirm-send-session">Checking...</span>
+      </div>
+      <div class="flex justify-between items-center">
         <span class="text-[#8696a0]">Target Group:</span>
         <span class="font-medium text-white" id="confirm-send-group">All Active Contacts</span>
       </div>
-      <div class="flex justify-between">
+      <div class="flex justify-between items-center">
         <span class="text-[#8696a0]">Eligible Recipients:</span>
-        <span class="font-medium text-[#25D366]" id="confirm-send-count">0 contacts</span>
+        <span class="font-bold text-[#25D366]" id="confirm-send-count">0 contacts</span>
       </div>
-      <div class="flex justify-between">
-        <span class="text-[#8696a0]">Estimated Duration:</span>
-        <span class="font-medium text-white" id="confirm-send-duration">~0 minutes</span>
+      <div class="flex justify-between items-center">
+        <span class="text-[#8696a0]">Template Selected:</span>
+        <span class="font-medium text-white truncate max-w-[200px]" id="confirm-send-template">Active Template</span>
+      </div>
+      <div class="flex justify-between items-center">
+        <span class="text-[#8696a0]">Estimated Send Time:</span>
+        <span class="font-mono text-white" id="confirm-send-duration">~0 mins</span>
+      </div>
+      <div class="flex justify-between items-center border-t border-[#3b4a54]/40 pt-2">
+        <span class="text-[#8696a0]">Anti-Ban Pacing:</span>
+        <span class="text-[11px] text-amber-300 font-mono" id="confirm-send-antiban">15 msgs/batch • 120s break</span>
       </div>
     </div>
 
-    <div class="flex justify-end gap-3">
-      <button class="btn btn-ghost" onclick="closeSendNowModal()">Cancel</button>
-      <button class="btn btn-green font-semibold" onclick="executeSendNow()">Start Sending Now</button>
+    <div id="confirm-send-warning" class="hidden p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-200 mb-4"></div>
+
+    <div class="flex items-center justify-between pt-2 border-t border-[#222e35]">
+      <button type="button" class="btn btn-outline-green text-xs" onclick="closeSendNowModal(); openTestModal();">🧪 Test on My Number First</button>
+      <div class="flex gap-2">
+        <button class="btn btn-ghost text-xs" onclick="closeSendNowModal()">Cancel</button>
+        <button class="btn btn-green text-xs font-semibold px-4" id="btn-do-send-now" onclick="executeSendNow()">▶ Start Live Send</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1923,6 +1685,78 @@ async function loadStatus() {
         badgeQuiet.textContent = '🌙 Quiet Hours: Off';
       }
     }
+
+    // ── Update Quick Setup Checklist ──
+    const stepWa = document.getElementById('step-badge-wa');
+    const stepDescWa = document.getElementById('step-desc-wa');
+    if (stepWa) {
+      if (s.session === 'connected') {
+        stepWa.className = 'tag tag-active text-[10px]';
+        stepWa.textContent = s.phone ? `+${s.phone}` : 'Connected';
+        if (stepDescWa) stepDescWa.textContent = 'WhatsApp is linked and ready to send.';
+      } else if (s.session === 'needs_qr') {
+        stepWa.className = 'tag tag-failed text-[10px]';
+        stepWa.textContent = 'Action Required';
+        if (stepDescWa) stepDescWa.textContent = 'Scan QR code or enter phone pairing code below.';
+      } else {
+        stepWa.className = 'tag tag-inactive text-[10px]';
+        stepWa.textContent = s.session;
+        if (stepDescWa) stepDescWa.textContent = 'Socket disconnected. Click Reconnect below.';
+      }
+    }
+
+    const stepContacts = document.getElementById('step-badge-contacts');
+    const stepDescContacts = document.getElementById('step-desc-contacts');
+    if (stepContacts) {
+      if (totalContacts > 0) {
+        stepContacts.className = 'tag tag-active text-[10px]';
+        stepContacts.textContent = `${totalContacts} Active`;
+        if (stepDescContacts) stepDescContacts.textContent = `${totalContacts} recipients ready for broadcast.`;
+      } else {
+        stepContacts.className = 'tag tag-failed text-[10px]';
+        stepContacts.textContent = '0 Contacts';
+        if (stepDescContacts) stepDescContacts.textContent = 'Click to import or add recipients.';
+      }
+    }
+
+    const stepTpl = document.getElementById('step-badge-template');
+    const stepDescTpl = document.getElementById('step-desc-template');
+    if (stepTpl) {
+      stepTpl.className = 'tag tag-active text-[10px]';
+      stepTpl.textContent = 'Configured';
+      if (stepDescTpl) stepDescTpl.textContent = 'Message template active with Spintax anti-ban.';
+    }
+
+    const stepSched = document.getElementById('step-badge-schedule');
+    const stepDescSched = document.getElementById('step-desc-schedule');
+    if (stepSched) {
+      if (s.isPaused) {
+        stepSched.className = 'tag tag-failed text-[10px]';
+        stepSched.textContent = 'Paused';
+        if (stepDescSched) stepDescSched.textContent = 'Monthly automation is paused.';
+      } else if (s.nextRun) {
+        stepSched.className = 'tag tag-active text-[10px]';
+        stepSched.textContent = 'Automated';
+        const d = new Date(s.nextRun);
+        if (stepDescSched) stepDescSched.textContent = `Next send: ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} at ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      } else {
+        stepSched.className = 'tag tag-inactive text-[10px]';
+        stepSched.textContent = 'Not Scheduled';
+        if (stepDescSched) stepDescSched.textContent = 'Click to configure monthly date and time.';
+      }
+    }
+
+    const setupProg = document.getElementById('setup-progress-badge');
+    if (setupProg) {
+      const isReady = s.session === 'connected' && totalContacts > 0 && !s.isPaused;
+      if (isReady) {
+        setupProg.className = 'tag tag-active text-xs font-semibold';
+        setupProg.textContent = '● 100% Ready to Send';
+      } else {
+        setupProg.className = 'tag tag-failed text-xs font-semibold';
+        setupProg.textContent = 'Setup in Progress';
+      }
+    }
   } catch(e) {
     console.error('loadStatus error:', e);
   }
@@ -1987,9 +1821,20 @@ async function savePauseToggle() {
 // ── Send Now Flow ──
 async function confirmSendNow() {
   try {
+    const statusRes = await api('/status');
     const sched = await api('/schedule');
     const groups = await api('/groups');
     allGroupsMap = Object.fromEntries(groups.map(g => [g.id, g]));
+
+    const sessionEl = document.getElementById('confirm-send-session');
+    if (sessionEl) {
+      if (statusRes.session === 'connected') {
+        sessionEl.innerHTML = `<span class="text-[#25D366] font-semibold">● Connected (+${statusRes.phone || ''})</span>`;
+      } else {
+        sessionEl.innerHTML = `<span class="text-[#ea4335] font-semibold">⚠ ${statusRes.session} (Link required)</span>`;
+      }
+    }
+
     const groupName = sched && sched.group_id && allGroupsMap[sched.group_id]
       ? allGroupsMap[sched.group_id].name 
       : 'All Active Contacts';
@@ -1998,10 +1843,46 @@ async function confirmSendNow() {
     const countRes = await api('/contacts?limit=1&status=active' + (sched && sched.group_id ? `&groupId=${sched.group_id}` : ''));
     const total = countRes.total || 0;
     document.getElementById('confirm-send-count').textContent = `${total} eligible contacts`;
-    
-    const estSec = total * 6.5;
-    const estMin = Math.ceil(estSec / 60);
-    document.getElementById('confirm-send-duration').textContent = `~${estMin} minute${estMin === 1 ? '' : 's'}`;
+
+    // Template info
+    const tplRes = await api('/templates');
+    const activeTpl = (sched && sched.template_id && tplRes.find(t => t.id === sched.template_id)) || tplRes[0] || { title: 'Default Template' };
+    const tplEl = document.getElementById('confirm-send-template');
+    if (tplEl) tplEl.textContent = activeTpl.title;
+
+    // Accurate duration calculation based on batch size and delays
+    const batchSize = statusRes.batchSize || 15;
+    const cooldownSec = statusRes.batchCooldownSeconds || 120;
+    const avgDelaySec = 22.5; // average between 10s and 35s
+    const totalBatches = Math.ceil(total / batchSize);
+    const cooldowns = Math.max(0, totalBatches - 1);
+    const estSec = (total * avgDelaySec) + (cooldowns * cooldownSec);
+    const estMin = Math.max(1, Math.ceil(estSec / 60));
+    document.getElementById('confirm-send-duration').textContent = `~${estMin} min${estMin === 1 ? '' : 's'} (${totalBatches} batch${totalBatches === 1 ? '' : 'es'})`;
+
+    const antibanEl = document.getElementById('confirm-send-antiban');
+    if (antibanEl) antibanEl.textContent = `${batchSize} msgs/batch • ${cooldownSec}s break • 10-35s jitter`;
+
+    const warnEl = document.getElementById('confirm-send-warning');
+    const sendBtn = document.getElementById('btn-do-send-now');
+    if (warnEl) {
+      if (statusRes.session !== 'connected') {
+        warnEl.classList.remove('hidden');
+        warnEl.innerHTML = `<strong>WhatsApp Disconnected:</strong> Please link your WhatsApp account before starting live dispatch.`;
+        if (sendBtn) sendBtn.disabled = true;
+      } else if (total === 0) {
+        warnEl.classList.remove('hidden');
+        warnEl.innerHTML = `<strong>No Contacts:</strong> You have 0 active contacts in this group. Please add contacts before sending.`;
+        if (sendBtn) sendBtn.disabled = true;
+      } else if (statusRes.quietHoursActive) {
+        warnEl.classList.remove('hidden');
+        warnEl.innerHTML = `<strong>🌙 Quiet Hours Active (${statusRes.quietHoursStart}–${statusRes.quietHoursEnd}):</strong> Dispatch will automatically pause until safe hours resume.`;
+        if (sendBtn) sendBtn.disabled = false;
+      } else {
+        warnEl.classList.add('hidden');
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    }
     
     document.getElementById('send-now-modal').classList.remove('hidden');
   } catch(e) {
@@ -2131,8 +2012,29 @@ async function loadContacts(page = 1) {
     }
     
     const tbody = document.getElementById('contacts-list');
+    const searchVal = document.getElementById('contacts-search')?.value.trim() || '';
+    const grpFilterVal = document.getElementById('contacts-group-filter')?.value || '';
     if (allContacts.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-[#8696a0]">No contacts found matching criteria</td></tr>';
+      if (searchVal || grpFilterVal) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-[#8696a0]">No contacts match your current search or group filter.</td></tr>';
+      } else {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="text-center py-12">
+              <div class="max-w-md mx-auto space-y-3">
+                <div class="text-4xl">👥</div>
+                <div class="text-white font-bold text-base">Your contact list is empty</div>
+                <p class="text-xs text-[#8696a0]">Add your monthly broadcast recipients manually or import them from Excel or CSV with 1 click.</p>
+                <div class="flex flex-wrap justify-center gap-2 pt-2">
+                  <button class="btn btn-green text-xs font-semibold px-4" onclick="showAddContactModal()">+ Add First Contact</button>
+                  <button class="btn btn-ghost text-xs" onclick="openBulkImportModal()">📥 Bulk Import</button>
+                  <button class="btn btn-ghost text-xs" onclick="downloadSampleCSV()">📥 Download Sample CSV</button>
+                </div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
     } else {
       tbody.innerHTML = allContacts.map(c => {
         const groupsHtml = (c.groups && c.groups.length > 0)
@@ -2271,8 +2173,45 @@ async function delContact(id) {
   }
 }
 
+function scrollToQR() {
+  const qrCard = document.getElementById('whatsapp-card');
+  if (qrCard) {
+    qrCard.scrollIntoView({ behavior: 'smooth' });
+    qrCard.classList.add('ring-2', 'ring-[#25D366]');
+    setTimeout(() => qrCard.classList.remove('ring-2', 'ring-[#25D366]'), 2500);
+  }
+}
+
 function exportContactsCSV() {
   window.location.href = '/api/contacts/export';
+}
+
+function downloadSampleCSV() {
+  const csvContent = "Name,Phone,Notes,Group\n" +
+    "Ahmed Khan,03001234567,Invoice #101,Clients\n" +
+    "Sara Ali,+923219876543,Monthly Supporter,VIP\n" +
+    "Zainab Bibi,923331122334,Aeanat Contribution,Members\n" +
+    "John Doe,+14155552671,Partner,General\n";
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'whatsapp_contacts_sample.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Sample contacts CSV downloaded!', 'info');
+}
+
+function loadSampleBulkData() {
+  document.getElementById('bulk-import-text').value = 
+    "Ahmed Khan, 03001234567, Invoice #101\n" +
+    "Sara Ali, +92 321 9876543, Monthly Supporter\n" +
+    "Zainab Bibi, 923331122334, VIP Member\n" +
+    "John Doe, +14155552671, Partner";
+  parseBulkImportPreview();
+  showToast('Sample data loaded! Click "Import Valid Contacts" to test.', 'info');
 }
 
 // ── Bulk Import ──
@@ -2775,6 +2714,45 @@ function spinTextClient(text) {
   return prev;
 }
 
+function loadTemplatePreset(key) {
+  if (!key) return;
+  const presets = {
+    aeanat: {
+      title: 'Monthly Aeanat / Contribution',
+      body: `{Assalam-o-Alaikum|Salam} {{name}} بھائی!\nامید ہے آپ بخیریت ہوں گے۔\n{برائے مہربانی|یاد دہانی برائے} ماہ {{month}} {{year}} کی اعانت ارسال فرما دیں۔\n{جزاک اللہ خیراً|اللہ تعالی آپ کے رزق میں برکت عطا فرمائے}۔\nنوٹس: {{notes}}`
+    },
+    invoice: {
+      title: 'Monthly Invoice Notice',
+      body: `{Dear|Hello|Hi} {{name}},\n\n{Hope you are doing well|Hope this message finds you in good health}.\n\n{Your statement for {{month}} {{year}} is ready|This is a friendly reminder regarding your invoice for the month of {{month}} {{year}}}.\nDetails: {{notes}}\n\n{Thank you for your prompt payment|We greatly appreciate your timely cooperation}!\n\nBest regards,\nAccounts & Billing`
+    },
+    fee: {
+      title: 'Monthly Academy / Tuition Fee',
+      body: `{Dear Respected Parents|Respected Parent / Student},\n\n{This is a polite reminder that the dues for {{month}} {{year}} are now payable|Kindly note that the monthly tuition fee for {{month}} {{year}} is due}.\n\nStudent: {{name}}\nDetails: {{notes}}\n\n{Please submit the dues by the 10th of this month|Kindly share the deposit slip once transferred}.\n\nThank you,\nAdministration`
+    },
+    rent: {
+      title: 'Monthly Property Rent Reminder',
+      body: `{Assalam-o-Alaikum|Hello} {{name}},\n\n{This is a friendly reminder regarding the property rent for {{month}} {{year}}|Kindly arrange the monthly rent for {{month}} {{year}}}.\n\n{Please confirm once the transfer is completed|Let me know once sent so I can issue the receipt}.\n\n{Thank you|Regards}!`
+    },
+    gym: {
+      title: 'Gym & Club Membership Renewal',
+      body: `{Hey|Hello} {{firstName}}!\n\n{Your gym membership renewal for {{month}} {{year}} is now due|This is a quick heads up that your fitness subscription for {{month}} {{year}} is up for renewal}.\n\n{Let us know if you would like to renew or need any assistance|Keep up the great training}!\n\nFitness Club Team`
+    },
+    greeting: {
+      title: 'Monthly Client Wellbeing & Appreciation',
+      body: `{Assalam-o-Alaikum|Greetings|Hello} {{name}},\n\n{Wishing you and your family a blessed and prosperous {{month}} {{year}}|Hope your month of {{month}} is off to a wonderful start}!\n\n{We truly value your relationship with us and look forward to serving you|Thank you for being such a wonderful part of our journey}.\n\n{Warm regards|Best wishes},\nManagement Team`
+    }
+  };
+
+  const p = presets[key];
+  if (!p) return;
+  const titleEl = document.getElementById('modal-template-title');
+  const bodyEl = document.getElementById('modal-template-body');
+  if (titleEl) titleEl.value = p.title;
+  if (bodyEl) bodyEl.value = p.body;
+  updateInteractivePreview();
+  showToast(`Loaded preset: ${p.title}`, 'info');
+}
+
 function updateInteractivePreview() {
   const body = document.getElementById('modal-template-body')?.value || '';
   const lang = document.getElementById('preview-lang-picker')?.value || 'urdu';
@@ -2883,6 +2861,40 @@ async function previewSpintaxVariations() {
 }
 
 // ── Schedule & Exclusions ──
+function updateScheduleSummary() {
+  const day = parseInt(document.getElementById('sched-day')?.value || '1', 10);
+  const hour = parseInt(document.getElementById('sched-hour')?.value || '10', 10);
+  const min = parseInt(document.getElementById('sched-minute')?.value || '0', 10);
+  const tz = document.getElementById('sched-timezone')?.value || 'Asia/Karachi';
+  const enabled = document.getElementById('sched-enabled')?.checked ?? true;
+
+  const summaryEl = document.getElementById('schedule-human-summary');
+  const nextEl = document.getElementById('schedule-next-date');
+  if (!summaryEl) return;
+
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  const displayMin = String(min).padStart(2, '0');
+  const suffix = (day === 1 || day === 21 || day === 31) ? 'st' : (day === 2 || day === 22) ? 'nd' : (day === 3 || day === 23) ? 'rd' : 'th';
+
+  if (!enabled) {
+    summaryEl.textContent = `Automated schedule is currently DISABLED.`;
+    if (nextEl) nextEl.textContent = 'Status: Inactive';
+    return;
+  }
+
+  summaryEl.textContent = `Every month on the ${day}${suffix} at ${displayHour}:${displayMin} ${ampm} (${tz.split('/')[1] || tz})`;
+
+  // Calculate approximate next run date
+  const now = new Date();
+  let nextDate = new Date(now.getFullYear(), now.getMonth(), day, hour, min);
+  if (nextDate <= now) {
+    nextDate = new Date(now.getFullYear(), now.getMonth() + 1, day, hour, min);
+  }
+  const dateStr = nextDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (nextEl) nextEl.textContent = `Next send: ${dateStr}, ${displayHour}:${displayMin} ${ampm}`;
+}
+
 async function loadSchedule() {
   try {
     const s = await api('/schedule');
@@ -2908,6 +2920,7 @@ async function loadSchedule() {
       if (s.group_id) grpSel.value = s.group_id;
       document.getElementById('sched-enabled').checked = s.is_active !== 0;
     }
+    updateScheduleSummary();
     
     const isPaused = settings.global_paused === 'true';
     document.getElementById('pause-toggle').checked = isPaused;

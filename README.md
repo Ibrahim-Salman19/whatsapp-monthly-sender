@@ -42,9 +42,16 @@ A production-grade, self-hosted automation platform for scheduled and on-demand 
 - Node.js 20+ (Node 22 recommended)
 - npm
 
-### ⚡ 1-Command WSL Launch (Recommended)
+### 🪟 1-Click Windows Launch (Zero-Effort)
 
-Just clone and run:
+If you are running Windows with WSL:
+- **Visible Mode**: Double-click `START.bat` in the root folder. It starts the server inside WSL and instantly opens `http://localhost:3000` in your default browser.
+- **Silent Background Mode**: Double-click `START_BACKGROUND.vbs`. It runs silently in the background with zero visible windows.
+- **Auto-Start on Boot**: Double-click `deploy\windows\install-startup.bat` once, and it will auto-start silently every time your computer turns on.
+
+### ⚡ 1-Command WSL / Linux Launch
+
+From your WSL terminal:
 ```bash
 ./start.sh
 ```
